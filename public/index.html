@@ -7,28 +7,129 @@
 <title>env-vault</title>
 <style>
   :root {
-    --bg: #0b0d12;
-    --panel: #12151c;
-    --panel-2: #171b24;
-    --border: #262b36;
-    --text: #e6e9ef;
+    --bg: #08090d;
+    --bg-glow: radial-gradient(1200px 600px at 15% -10%, rgba(99,102,241,0.16), transparent 60%),
+               radial-gradient(900px 500px at 100% 0%, rgba(56,189,248,0.10), transparent 55%);
+    --panel: #101219;
+    --panel-2: #171a23;
+    --panel-3: #1d2029;
+    --border: #23262f;
+    --border-soft: rgba(255,255,255,0.06);
+    --text: #eef0f4;
     --muted: #8b93a3;
-    --accent: #5b9dff;
+    --muted-2: #5f6675;
+    --accent: #6c8fff;
     --accent-2: #7ee787;
+    --accent-grad: linear-gradient(135deg, #6c8fff 0%, #8b6cff 100%);
     --danger: #ff6b6b;
+    --danger-soft: rgba(255,107,107,0.12);
     --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
-    --header-h: 56px;
+    --header-h: 60px;
+    --ease: cubic-bezier(.2,.8,.2,1);
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; }
   body {
     background: var(--bg);
+    background-image: var(--bg-glow);
+    background-attachment: fixed;
     color: var(--text);
-    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  button, input, textarea, select { font: inherit; }
+  button, input, textarea, select { font: inherit; color: inherit; }
   button { cursor: pointer; min-height: 40px; }
   a { color: var(--accent); }
+  ::selection { background: rgba(108,143,255,0.35); }
+
+  /* ---------- brand ---------- */
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 16px; letter-spacing: -0.01em; white-space: nowrap; }
+  .brand .mark {
+    width: 22px; height: 22px; border-radius: 7px;
+    background: var(--accent-grad);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 4px 14px -4px rgba(108,143,255,0.6);
+    flex-shrink: 0;
+  }
+  .brand .mark svg { width: 13px; height: 13px; color: #0b0d12; }
+
+  /* ---------- primitives ---------- */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 22px;
+    box-shadow: 0 1px 0 var(--border-soft) inset, 0 20px 50px -25px rgba(0,0,0,0.6);
+  }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 7px; font-weight: 500; }
+  input[type=password], input[type=text], input[type=search], textarea, select.select {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--r-sm);
+    padding: 10px 12px;
+    width: 100%;
+    transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease), background 150ms var(--ease);
+  }
+  input:hover, textarea:hover { border-color: #34394a; }
+  input:focus, textarea:focus, select.select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(108,143,255,0.15);
+  }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  textarea { font-family: var(--mono); font-size: 13px; min-height: 84px; resize: vertical; }
+
+  button {
+    background: var(--accent-grad);
+    color: #0a0c11;
+    border: none;
+    border-radius: var(--r-sm);
+    padding: 10px 16px;
+    font-weight: 600;
+    font-size: 13.5px;
+    transition: transform 120ms var(--ease), box-shadow 150ms var(--ease), opacity 150ms var(--ease), filter 150ms var(--ease);
+    box-shadow: 0 6px 16px -8px rgba(108,143,255,0.7);
+  }
+  button:hover { filter: brightness(1.08); }
+  button:active { transform: scale(0.97); }
+  button.ghost {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-weight: 500;
+    box-shadow: none;
+  }
+  button.ghost:hover { background: var(--panel-3); border-color: #34394a; }
+  button.danger { background: var(--danger-soft); color: var(--danger); box-shadow: none; border: 1px solid rgba(255,107,107,0.25); }
+  button.danger:hover { background: rgba(255,107,107,0.2); }
+  button.small { padding: 7px 12px; font-size: 12.5px; min-height: 32px; }
+  button.icon-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--muted);
+    box-shadow: none;
+    padding: 0;
+    width: 32px; height: 32px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: var(--r-sm);
+    min-height: 0;
+  }
+  button.icon-btn:hover { background: var(--panel-3); color: var(--text); }
+  button.icon-btn.danger-hover:hover { background: var(--danger-soft); color: var(--danger); }
+  button:disabled { opacity: 0.5; cursor: default; transform: none !important; }
+  .spinner {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid rgba(0,0,0,0.25); border-top-color: currentColor;
+    animation: spin 700ms linear infinite;
+    display: inline-block; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .muted { color: var(--muted); }
+  .error { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 0; }
 
   /* ---------- login ---------- */
   #loginScreen {
@@ -37,174 +138,220 @@
     align-items: center;
     justify-content: center;
     padding: 20px;
+    position: relative;
   }
-  #loginScreen .card { width: 100%; max-width: 360px; }
-  #loginScreen h1 { text-align: center; margin: 0 0 4px; }
-  #loginScreen p.muted { text-align: center; margin: 0 0 20px; }
-
-  .card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 20px;
+  #loginScreen .card {
+    width: 100%; max-width: 380px;
+    animation: rise 500ms var(--ease);
   }
-  label { font-size: 12.5px; color: var(--muted); display: block; margin-bottom: 6px; }
-  input[type=password], input[type=text], input[type=search], textarea {
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    border-radius: 7px;
-    padding: 10px 12px;
-    width: 100%;
-  }
-  input:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  textarea { font-family: var(--mono); font-size: 13px; min-height: 80px; resize: vertical; }
-  button {
-    background: var(--accent);
-    color: #0b0d12;
-    border: none;
-    border-radius: 7px;
-    padding: 10px 16px;
-    font-weight: 600;
-    font-size: 13.5px;
-  }
-  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); font-weight: 500; }
-  button.danger { background: var(--danger); color: #1a0505; }
-  button.small { padding: 7px 11px; font-size: 12.5px; min-height: 34px; }
-  button:disabled { opacity: 0.5; cursor: default; }
-  .muted { color: var(--muted); }
-  .error { color: var(--danger); font-size: 13px; margin-top: 8px; }
+  #loginScreen .brand { justify-content: center; font-size: 20px; margin-bottom: 4px; }
+  #loginScreen .brand .mark { width: 30px; height: 30px; border-radius: 9px; }
+  #loginScreen .brand .mark svg { width: 17px; height: 17px; }
+  #loginScreen p.muted { text-align: center; margin: 4px 0 24px; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
 
   /* ---------- app shell ---------- */
   #app { display: none; min-height: 100vh; }
-  #app.visible { display: block; }
+  #app.visible { display: block; animation: fadeIn 300ms var(--ease); }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
   header#topbar {
     position: sticky;
     top: 0;
     z-index: 50;
     height: var(--header-h);
-    background: var(--panel);
+    background: rgba(16,18,25,0.72);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 0 14px;
+    gap: 12px;
+    padding: 0 16px;
   }
-  header#topbar h1 { font-size: 16px; margin: 0; white-space: nowrap; }
   header#topbar .spacer { flex: 1; }
-  #searchInput { max-width: 280px; }
+  .search-wrap { position: relative; max-width: 320px; width: 100%; }
+  .search-wrap svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--muted-2); pointer-events: none; }
+  #searchInput { padding-left: 34px; }
+  kbd {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    font-family: var(--mono); font-size: 10.5px; color: var(--muted-2);
+    background: var(--panel-3); border: 1px solid var(--border); border-radius: 4px;
+    padding: 1px 5px;
+  }
 
-  main { max-width: 1100px; margin: 0 auto; padding: 16px; padding-bottom: 90px; }
+  main { max-width: 1080px; margin: 0 auto; padding: 20px; padding-bottom: 100px; }
 
-  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
   .chip {
     border: 1px solid var(--border);
     background: var(--panel-2);
     color: var(--muted);
     border-radius: 999px;
-    padding: 8px 14px;
+    padding: 8px 15px;
     font-size: 12.5px;
-    min-height: 36px;
+    min-height: 34px;
+    transition: all 150ms var(--ease);
+    box-shadow: none;
   }
-  .chip.active { border-color: var(--accent); color: var(--accent); }
-  .chips-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+  .chip:hover { border-color: #34394a; color: var(--text); }
+  .chip.active { border-color: var(--accent); color: var(--accent); background: rgba(108,143,255,0.1); }
+  .chips-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .chips-scroll::-webkit-scrollbar { display: none; }
 
   .var-row {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 12px 14px;
+    border-radius: var(--r-md);
+    padding: 14px 16px;
     margin-bottom: 8px;
     display: grid;
-    grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr) auto;
-    gap: 10px 16px;
+    grid-template-columns: minmax(140px, 1fr) minmax(0, 1.6fr) auto;
+    gap: 6px 18px;
     align-items: center;
+    transition: border-color 150ms var(--ease), transform 150ms var(--ease), box-shadow 150ms var(--ease);
+    animation: rowIn 260ms var(--ease);
   }
-  .var-key { font-family: var(--mono); font-weight: 700; word-break: break-all; }
-  .var-val { font-family: var(--mono); color: var(--muted); word-break: break-all; }
+  @keyframes rowIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .var-row:hover { border-color: #2c303c; box-shadow: 0 8px 24px -18px rgba(0,0,0,0.8); }
+  .var-key { font-family: var(--mono); font-weight: 700; word-break: break-all; font-size: 13px; letter-spacing: -0.01em; }
+  .var-val-wrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .var-val { font-family: var(--mono); color: var(--muted); word-break: break-all; font-size: 13px; flex: 1; min-width: 0; }
   .var-val.revealed { color: var(--text); }
-  .var-badges { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; }
-  .badge { display: inline-block; background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; font-size: 11px; color: var(--muted); }
-  .badge.shared { border-color: var(--accent); color: var(--accent); }
-  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  .var-val.empty-val { color: var(--muted-2); font-style: italic; font-family: inherit; }
+  .var-badges { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 2px 8px; font-size: 11px; color: var(--muted);
+  }
+  .badge.shared { border-color: rgba(108,143,255,0.4); color: var(--accent); background: rgba(108,143,255,0.08); }
+  .row-actions { display: flex; gap: 2px; flex-wrap: nowrap; justify-content: flex-end; }
+  .empty { color: var(--muted); padding: 70px 20px; text-align: center; }
+  .empty svg { color: var(--muted-2); margin-bottom: 14px; }
+  .empty .empty-title { font-weight: 600; color: var(--text); margin-bottom: 4px; }
+
+  .skeleton-row {
+    height: 62px; border-radius: var(--r-md); margin-bottom: 8px;
+    background: linear-gradient(90deg, var(--panel) 25%, var(--panel-2) 37%, var(--panel) 63%);
+    background-size: 400% 100%;
+    animation: shimmer 1.4s ease infinite;
+    border: 1px solid var(--border);
+  }
+  @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 
   @media (max-width: 640px) {
     .var-row { grid-template-columns: 1fr; }
-    .row-actions { justify-content: flex-start; }
-    #searchInput { max-width: none; }
-    header#topbar h1 { display: none; }
+    .row-actions { justify-content: flex-start; margin-top: 4px; }
+    .search-wrap { max-width: none; }
+    header#topbar .brand-text { display: none; }
   }
 
-  /* ---------- fab / bottom action bar (always reachable, thumb-friendly) ---------- */
+  /* ---------- fab / bottom action bar ---------- */
   #fabBar {
     position: fixed;
     left: 0; right: 0; bottom: 0;
     z-index: 60;
-    background: var(--panel);
+    background: rgba(16,18,25,0.8);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
     border-top: 1px solid var(--border);
-    padding: 10px 14px;
+    padding: 10px 16px;
     padding-bottom: max(10px, env(safe-area-inset-bottom));
     display: flex;
     gap: 10px;
     justify-content: center;
   }
-  #fabBar button { flex: 1; max-width: 220px; }
+  #fabBar button { flex: 1; max-width: 220px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
 
   /* ---------- modals ---------- */
   .modal-backdrop {
     display: none;
     position: fixed; inset: 0;
-    background: rgba(0,0,0,0.6);
+    background: rgba(5,6,9,0.7);
+    backdrop-filter: blur(2px);
     z-index: 100;
     align-items: flex-start;
     justify-content: center;
     padding: 40px 16px;
     overflow-y: auto;
   }
-  .modal-backdrop.visible { display: flex; }
+  .modal-backdrop.visible { display: flex; animation: fadeIn 160ms var(--ease); }
   .modal {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 22px;
+    border-radius: var(--r-lg);
+    padding: 24px;
     width: 100%;
     max-width: 480px;
+    box-shadow: 0 30px 80px -20px rgba(0,0,0,0.7);
+    animation: modalIn 220ms var(--ease);
   }
-  .modal h2 { margin-top: 0; font-size: 17px; }
-  .modal .field { margin-bottom: 14px; }
-  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+  @keyframes modalIn { from { opacity: 0; transform: translateY(12px) scale(0.98); } to { opacity: 1; transform: none; } }
+  .modal h2 { margin-top: 0; font-size: 17px; display: flex; align-items: center; gap: 9px; }
+  .modal .field { margin-bottom: 16px; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
   .project-checks { display: flex; flex-wrap: wrap; gap: 8px; }
-  .project-checks label { display: flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px; padding: 7px 10px; font-size: 12.5px; color: var(--text); cursor: pointer; }
-  .project-checks input { width: auto; }
+  .project-checks label {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px;
+    padding: 7px 11px; font-size: 12.5px; color: var(--text); cursor: pointer;
+    transition: all 150ms var(--ease);
+  }
+  .project-checks label:has(input:checked) { border-color: var(--accent); background: rgba(108,143,255,0.1); }
+  .project-checks input { width: auto; accent-color: var(--accent); }
 
   /* ---------- usage panel ---------- */
-  .usage-block { margin-bottom: 18px; }
-  .usage-block h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 8px; }
+  .usage-block { margin-bottom: 20px; }
+  .usage-block h3 { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 9px; font-weight: 700; }
+  .cmd-wrap { position: relative; }
   pre.cmd {
     background: #000;
     border: 1px solid var(--border);
-    border-radius: 7px;
-    padding: 12px;
+    border-radius: var(--r-sm);
+    padding: 14px;
+    padding-right: 40px;
     overflow-x: auto;
     font-family: var(--mono);
     font-size: 12.5px;
     margin: 0;
     white-space: pre-wrap;
     word-break: break-word;
+    line-height: 1.6;
   }
+  .cmd-copy { position: absolute; top: 8px; right: 8px; }
   .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
-  .tab { padding: 8px 14px; border-radius: 7px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); min-height: 36px; }
-  .tab.active { color: var(--text); border-color: var(--accent); }
+  .tab {
+    padding: 8px 14px; border-radius: var(--r-sm); background: var(--panel-2);
+    border: 1px solid var(--border); color: var(--muted); min-height: 34px;
+    box-shadow: none; font-weight: 500;
+  }
+  .tab.active { color: var(--text); border-color: var(--accent); background: rgba(108,143,255,0.1); }
   [hidden] { display: none !important; }
+
+  /* ---------- toasts ---------- */
+  #toasts {
+    position: fixed; bottom: 90px; right: 16px; z-index: 200;
+    display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+    pointer-events: none;
+  }
+  .toast {
+    background: var(--panel-3); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 14px; border-radius: var(--r-sm); font-size: 13px;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 12px 30px -12px rgba(0,0,0,0.6);
+    animation: toastIn 200ms var(--ease);
+  }
+  .toast.err { border-color: rgba(255,107,107,0.4); color: #ffb3b3; }
+  .toast svg { flex-shrink: 0; }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 </style>
 </head>
 <body>
 
 <div id="loginScreen">
   <div class="card">
-    <h1>env-vault</h1>
+    <div class="brand"><span class="mark" id="loginIcon"></span> env-vault</div>
     <p class="muted">Your personal secrets manager</p>
     <div class="field">
       <label for="loginPassword">Password</label>
@@ -217,11 +364,15 @@
 
 <div id="app">
   <header id="topbar">
-    <h1>env-vault</h1>
-    <input type="search" id="searchInput" placeholder="search key, value, or project…">
+    <div class="brand brand-text"><span class="mark" id="topbarIcon"></span> env-vault</div>
+    <div class="search-wrap">
+      <span id="searchIcon"></span>
+      <input type="search" id="searchInput" placeholder="search key, value, or project…">
+      <kbd>/</kbd>
+    </div>
     <div class="spacer"></div>
-    <button class="ghost small" id="usageBtn">Usage</button>
-    <button class="ghost small" id="logoutBtn">Log out</button>
+    <button class="ghost small" id="usageBtn"></button>
+    <button class="ghost small" id="logoutBtn"></button>
   </header>
 
   <main>
@@ -230,14 +381,16 @@
     </div>
 
     <div id="rows"></div>
-    <div class="empty" id="emptyMsg" hidden>No matching variables yet.</div>
+    <div class="empty" id="emptyMsg" hidden></div>
   </main>
 
   <div id="fabBar">
-    <button class="ghost" id="newProjectBtn">+ Project</button>
-    <button id="newVarBtn">+ Variable</button>
+    <button class="ghost" id="newProjectBtn"></button>
+    <button id="newVarBtn"></button>
   </div>
 </div>
+
+<div id="toasts"></div>
 
 <!-- Variable modal -->
 <div class="modal-backdrop" id="varModalBackdrop">
@@ -285,18 +438,21 @@
 
 <!-- Usage modal -->
 <div class="modal-backdrop" id="usageModalBackdrop">
-  <div class="modal" style="max-width:640px;">
+  <div class="modal" style="max-width:660px;">
     <h2>Use this vault from any project</h2>
     <p class="muted">No cloning, no local files. Any machine that has the <code>envvault</code> script installed and logged in can pull a project's variables directly from this vault at runtime.</p>
 
     <div class="usage-block">
       <h3>One-time setup (per machine, container, or CI runner)</h3>
-      <pre class="cmd" id="usageInstall"></pre>
+      <div class="cmd-wrap">
+        <pre class="cmd" id="usageInstall"></pre>
+        <button class="ghost small icon-btn cmd-copy" id="copyInstallBtn" title="Copy"></button>
+      </div>
     </div>
 
     <div class="usage-block">
       <label for="usageProjectSelect">Show usage for project</label>
-      <select id="usageProjectSelect" style="width:100%; background:var(--panel-2); color:var(--text); border:1px solid var(--border); border-radius:7px; padding:9px;"></select>
+      <select class="select" id="usageProjectSelect"></select>
     </div>
 
     <div class="tabs">
@@ -305,7 +461,10 @@
       <button class="tab" data-lang="python">Python</button>
       <button class="tab" data-lang="docker">Docker</button>
     </div>
-    <pre class="cmd" id="usageSnippet"></pre>
+    <div class="cmd-wrap">
+      <pre class="cmd" id="usageSnippet"></pre>
+      <button class="ghost small icon-btn cmd-copy" id="copySnippetBtn" title="Copy"></button>
+    </div>
 
     <div class="modal-actions">
       <button class="ghost" id="usageModalClose">Close</button>
@@ -314,13 +473,75 @@
 </div>
 
 <script>
+// ---------- icon system (inline SVG, no external requests) ----------
+const ICON_PATHS = {
+  eye: '<circle cx="12" cy="12" r="3"/><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/>',
+  eyeOff: '<path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 8 10 8a17.44 17.44 0 0 1-2.16 3.19m-3.09 2.55A9.12 9.12 0 0 1 12 20c-6.5 0-10-8-10-8a17.55 17.55 0 0 1 4.22-5.24"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="2" y1="2" x2="22" y2="22"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  check: '<polyline points="20 6 9 17 4 12"/>',
+  edit: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  logOut: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+  folder: '<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>',
+  alert: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+};
+function icon(name, size = 18) {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON_PATHS[name] || ""}</svg>`;
+}
+
 const $ = (id) => document.getElementById(id);
 const API = "";
 let VARS = [];
 let PROJECTS = [];
 let activeProject = "__all__";
 let revealed = new Set();
-let editingKey = null;
+
+// static icons
+$("loginIcon").innerHTML = icon("lock", 17);
+$("topbarIcon").innerHTML = icon("lock", 13);
+$("searchIcon").innerHTML = icon("search", 15);
+$("usageBtn").innerHTML = icon("book", 15) + " Usage";
+$("usageBtn").style.display = "inline-flex";
+$("usageBtn").style.alignItems = "center";
+$("usageBtn").style.gap = "6px";
+$("logoutBtn").innerHTML = icon("logOut", 15) + " Log out";
+$("logoutBtn").style.display = "inline-flex";
+$("logoutBtn").style.alignItems = "center";
+$("logoutBtn").style.gap = "6px";
+$("newProjectBtn").innerHTML = icon("folder", 16) + " Project";
+$("newVarBtn").innerHTML = icon("plus", 16) + " Variable";
+$("copyInstallBtn").innerHTML = icon("copy", 15);
+$("copySnippetBtn").innerHTML = icon("copy", 15);
+
+// ---------- toasts ----------
+function toast(message, isError = false) {
+  const el = document.createElement("div");
+  el.className = "toast" + (isError ? " err" : "");
+  el.innerHTML = icon(isError ? "alert" : "check", 15) + `<span>${message}</span>`;
+  $("toasts").appendChild(el);
+  setTimeout(() => {
+    el.style.transition = "opacity 200ms, transform 200ms";
+    el.style.opacity = "0";
+    el.style.transform = "translateY(6px)";
+    setTimeout(() => el.remove(), 200);
+  }, 2400);
+}
+
+async function withLoading(btn, fn) {
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+}
 
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
@@ -349,7 +570,7 @@ async function boot() {
   try {
     await api("/api/whoami");
     showApp();
-    await refreshAll();
+    await refreshAll(true);
   } catch {
     showLogin();
   }
@@ -359,19 +580,20 @@ $("loginBtn").onclick = async () => {
   const password = $("loginPassword").value;
   $("loginPassword").value = "";
   $("loginError").textContent = "";
-  try {
-    await fetch(API + "/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
-    }).then(async (res) => {
+  await withLoading($("loginBtn"), async () => {
+    try {
+      const res = await fetch(API + "/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
       if (!res.ok) throw new Error((await res.json()).error || "login failed");
-    });
-    showApp();
-    await refreshAll();
-  } catch (e) {
-    $("loginError").textContent = e.message;
-  }
+      showApp();
+      await refreshAll(true);
+    } catch (e) {
+      $("loginError").textContent = e.message;
+    }
+  });
 };
 $("loginPassword").addEventListener("keydown", (e) => { if (e.key === "Enter") $("loginBtn").click(); });
 
@@ -380,7 +602,12 @@ $("logoutBtn").onclick = async () => {
   showLogin();
 };
 
-async function refreshAll() {
+function renderSkeleton() {
+  $("rows").innerHTML = Array.from({ length: 4 }).map(() => '<div class="skeleton-row"></div>').join("");
+}
+
+async function refreshAll(initial = false) {
+  if (initial) renderSkeleton();
   [VARS, PROJECTS] = await Promise.all([api("/api/vars"), api("/api/projects")]);
   renderChips();
   render();
@@ -409,6 +636,16 @@ function matches(v, query) {
   return v.key.toLowerCase().includes(q) || v.value.toLowerCase().includes(q) || v.projects.some((p) => p.toLowerCase().includes(q));
 }
 
+function iconButton(name, title, onClick, extraClass = "") {
+  const b = document.createElement("button");
+  b.className = "ghost icon-btn " + extraClass;
+  b.title = title;
+  b.setAttribute("aria-label", title);
+  b.innerHTML = icon(name, 16);
+  b.onclick = onClick;
+  return b;
+}
+
 function render() {
   const query = $("searchInput").value.trim();
   const rows = $("rows");
@@ -426,33 +663,28 @@ function render() {
     keyEl.className = "var-key";
     keyEl.textContent = v.key;
 
+    const valWrap = document.createElement("div");
+    valWrap.className = "var-val-wrap";
     const valEl = document.createElement("div");
-    valEl.className = "var-val" + (isRevealed ? " revealed" : "");
-    if (v.value.length === 0) {
-      valEl.textContent = "(empty)";
-    } else {
-      valEl.textContent = isRevealed ? v.value : "•".repeat(Math.min(v.value.length, 24));
-    }
+    const isEmpty = v.value.length === 0;
+    valEl.className = "var-val" + (isRevealed ? " revealed" : "") + (isEmpty ? " empty-val" : "");
+    valEl.textContent = isEmpty ? "empty — not set yet" : (isRevealed ? v.value : "•".repeat(Math.min(v.value.length, 22)));
+    const eyeBtn = iconButton(isRevealed ? "eyeOff" : "eye", isRevealed ? "Hide" : "Reveal", () => {
+      isRevealed ? revealed.delete(v.key) : revealed.add(v.key);
+      render();
+    });
+    if (isEmpty) eyeBtn.style.visibility = "hidden";
+    valWrap.append(valEl, eyeBtn);
 
     const actions = document.createElement("div");
     actions.className = "row-actions";
-    const revealBtn = document.createElement("button");
-    revealBtn.className = "ghost small";
-    revealBtn.textContent = isRevealed ? "Hide" : "Reveal";
-    revealBtn.onclick = () => { isRevealed ? revealed.delete(v.key) : revealed.add(v.key); render(); };
-    const copyBtn = document.createElement("button");
-    copyBtn.className = "ghost small";
-    copyBtn.textContent = "Copy";
-    copyBtn.onclick = async () => { await navigator.clipboard.writeText(v.value); copyBtn.textContent = "Copied"; setTimeout(() => (copyBtn.textContent = "Copy"), 1000); };
-    const editBtn = document.createElement("button");
-    editBtn.className = "ghost small";
-    editBtn.textContent = "Edit";
-    editBtn.onclick = () => openVarModal(v);
-    const delBtn = document.createElement("button");
-    delBtn.className = "danger small";
-    delBtn.textContent = "Delete";
-    delBtn.onclick = () => deleteVar(v.key);
-    actions.append(revealBtn, copyBtn, editBtn, delBtn);
+    const copyBtn = iconButton("copy", "Copy value", async () => {
+      await navigator.clipboard.writeText(v.value);
+      toast(`Copied ${v.key}`);
+    });
+    const editBtn = iconButton("edit", "Edit", () => openVarModal(v));
+    const delBtn = iconButton("trash", "Delete", () => deleteVar(v.key), "danger-hover");
+    actions.append(copyBtn, editBtn, delBtn);
 
     const badges = document.createElement("div");
     badges.className = "var-badges";
@@ -462,17 +694,31 @@ function render() {
       badges.innerHTML = v.projects.map((p) => `<span class="badge${v.projects.length > 1 ? " shared" : ""}">${p}</span>`).join("");
     }
 
-    row.append(keyEl, valEl, actions, badges);
+    row.append(keyEl, valWrap, actions, badges);
     rows.appendChild(row);
   }
-  $("emptyMsg").hidden = shown !== 0;
+
+  const emptyMsg = $("emptyMsg");
+  emptyMsg.hidden = shown !== 0;
+  if (shown === 0) {
+    const hasAny = VARS.length > 0;
+    emptyMsg.innerHTML = `${icon(hasAny ? "search" : "lock", 32)}<div class="empty-title">${hasAny ? "No matches" : "No variables yet"}</div><div>${hasAny ? "Try a different search or filter." : "Add your first one below."}</div>`;
+  }
 }
 $("searchInput").oninput = render;
+document.addEventListener("keydown", (e) => {
+  if (e.key === "/" && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "TEXTAREA") {
+    e.preventDefault();
+    $("searchInput").focus();
+  }
+  if (e.key === "Escape") {
+    document.querySelectorAll(".modal-backdrop.visible").forEach((bd) => bd.classList.remove("visible"));
+  }
+});
 
 // ---------- variable modal ----------
 function openVarModal(v) {
-  editingKey = v ? v.key : null;
-  $("varModalTitle").textContent = v ? `Edit ${v.key}` : "Add variable";
+  $("varModalTitle").innerHTML = v ? `${icon("edit", 16)} Edit ${v.key}` : `${icon("plus", 16)} Add variable`;
   $("varKeyInput").value = v ? v.key : "";
   $("varKeyInput").disabled = !!v;
   $("varValInput").value = v ? v.value : "";
@@ -490,6 +736,7 @@ function openVarModal(v) {
     checks.appendChild(label);
   }
   $("varModalBackdrop").classList.add("visible");
+  setTimeout(() => $("varKeyInput").disabled || $("varKeyInput").focus(), 50);
 }
 $("newVarBtn").onclick = () => openVarModal(null);
 $("varModalCancel").onclick = () => $("varModalBackdrop").classList.remove("visible");
@@ -498,17 +745,21 @@ $("varModalSave").onclick = async () => {
   const value = $("varValInput").value;
   const projectIds = [...$("varProjectChecks").querySelectorAll("input:checked")].map((cb) => cb.value);
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) { $("varModalError").textContent = "key must look like AN_ENV_VAR_NAME"; return; }
-  try {
-    await api("/api/vars", { method: "POST", body: JSON.stringify({ key, value, projects: projectIds }) });
-    $("varModalBackdrop").classList.remove("visible");
-    await refreshAll();
-  } catch (e) {
-    $("varModalError").textContent = e.message;
-  }
+  await withLoading($("varModalSave"), async () => {
+    try {
+      await api("/api/vars", { method: "POST", body: JSON.stringify({ key, value, projects: projectIds }) });
+      $("varModalBackdrop").classList.remove("visible");
+      toast(`Saved ${key}`);
+      await refreshAll();
+    } catch (e) {
+      $("varModalError").textContent = e.message;
+    }
+  });
 };
 async function deleteVar(key) {
   if (!confirm(`Delete ${key}? This can't be undone.`)) return;
   await api(`/api/vars/${encodeURIComponent(key)}`, { method: "DELETE" });
+  toast(`Deleted ${key}`);
   await refreshAll();
 }
 
@@ -518,18 +769,22 @@ $("newProjectBtn").onclick = () => {
   $("projDescInput").value = "";
   $("projModalError").textContent = "";
   $("projModalBackdrop").classList.add("visible");
+  setTimeout(() => $("projNameInput").focus(), 50);
 };
 $("projModalCancel").onclick = () => $("projModalBackdrop").classList.remove("visible");
 $("projModalSave").onclick = async () => {
   const name = $("projNameInput").value.trim().toLowerCase();
   const description = $("projDescInput").value.trim();
-  try {
-    await api("/api/projects", { method: "POST", body: JSON.stringify({ name, description }) });
-    $("projModalBackdrop").classList.remove("visible");
-    await refreshAll();
-  } catch (e) {
-    $("projModalError").textContent = e.message;
-  }
+  await withLoading($("projModalSave"), async () => {
+    try {
+      await api("/api/projects", { method: "POST", body: JSON.stringify({ name, description }) });
+      $("projModalBackdrop").classList.remove("visible");
+      toast(`Created ${name}`);
+      await refreshAll();
+    } catch (e) {
+      $("projModalError").textContent = e.message;
+    }
+  });
 };
 
 // ---------- usage modal ----------
@@ -561,6 +816,8 @@ document.querySelectorAll(".tab").forEach((tab) => {
     renderUsage();
   };
 });
+$("copyInstallBtn").onclick = async () => { await navigator.clipboard.writeText($("usageInstall").textContent); toast("Copied"); };
+$("copySnippetBtn").onclick = async () => { await navigator.clipboard.writeText($("usageSnippet").textContent); toast("Copied"); };
 
 // close modals on backdrop click
 document.querySelectorAll(".modal-backdrop").forEach((bd) => {
