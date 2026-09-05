@@ -1,0 +1,13 @@
+name = "env-vault-api"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+account_id = "62e38740a6a2d2fd5ebf0834d7b2c4ff"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "env-vault-db"
+database_id = "d7eef25d-d368-4f84-94bd-bb02aff03a4e"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"

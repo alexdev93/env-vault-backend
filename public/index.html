@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>env-vault</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #12151c;
+    --panel-2: #171b24;
+    --border: #262b36;
+    --text: #e6e9ef;
+    --muted: #8b93a3;
+    --accent: #5b9dff;
+    --accent-2: #7ee787;
+    --danger: #ff6b6b;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    --header-h: 56px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  button, input, textarea, select { font: inherit; }
+  button { cursor: pointer; min-height: 40px; }
+  a { color: var(--accent); }
+
+  /* ---------- login ---------- */
+  #loginScreen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  #loginScreen .card { width: 100%; max-width: 360px; }
+  #loginScreen h1 { text-align: center; margin: 0 0 4px; }
+  #loginScreen p.muted { text-align: center; margin: 0 0 20px; }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  label { font-size: 12.5px; color: var(--muted); display: block; margin-bottom: 6px; }
+  input[type=password], input[type=text], input[type=search], textarea {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 7px;
+    padding: 10px 12px;
+    width: 100%;
+  }
+  input:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  textarea { font-family: var(--mono); font-size: 13px; min-height: 80px; resize: vertical; }
+  button {
+    background: var(--accent);
+    color: #0b0d12;
+    border: none;
+    border-radius: 7px;
+    padding: 10px 16px;
+    font-weight: 600;
+    font-size: 13.5px;
+  }
+  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); font-weight: 500; }
+  button.danger { background: var(--danger); color: #1a0505; }
+  button.small { padding: 7px 11px; font-size: 12.5px; min-height: 34px; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .muted { color: var(--muted); }
+  .error { color: var(--danger); font-size: 13px; margin-top: 8px; }
+
+  /* ---------- app shell ---------- */
+  #app { display: none; min-height: 100vh; }
+  #app.visible { display: block; }
+
+  header#topbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    height: var(--header-h);
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+  }
+  header#topbar h1 { font-size: 16px; margin: 0; white-space: nowrap; }
+  header#topbar .spacer { flex: 1; }
+  #searchInput { max-width: 280px; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; padding-bottom: 90px; }
+
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+  .chip {
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: 12.5px;
+    min-height: 36px;
+  }
+  .chip.active { border-color: var(--accent); color: var(--accent); }
+  .chips-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+
+  .var-row {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr) auto;
+    gap: 10px 16px;
+    align-items: center;
+  }
+  .var-key { font-family: var(--mono); font-weight: 700; word-break: break-all; }
+  .var-val { font-family: var(--mono); color: var(--muted); word-break: break-all; }
+  .var-val.revealed { color: var(--text); }
+  .var-badges { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; }
+  .badge { display: inline-block; background: var(--panel-2); border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; font-size: 11px; color: var(--muted); }
+  .badge.shared { border-color: var(--accent); color: var(--accent); }
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+
+  @media (max-width: 640px) {
+    .var-row { grid-template-columns: 1fr; }
+    .row-actions { justify-content: flex-start; }
+    #searchInput { max-width: none; }
+    header#topbar h1 { display: none; }
+  }
+
+  /* ---------- fab / bottom action bar (always reachable, thumb-friendly) ---------- */
+  #fabBar {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 60;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    padding: 10px 14px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+  }
+  #fabBar button { flex: 1; max-width: 220px; }
+
+  /* ---------- modals ---------- */
+  .modal-backdrop {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 40px 16px;
+    overflow-y: auto;
+  }
+  .modal-backdrop.visible { display: flex; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px;
+    width: 100%;
+    max-width: 480px;
+  }
+  .modal h2 { margin-top: 0; font-size: 17px; }
+  .modal .field { margin-bottom: 14px; }
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+  .project-checks { display: flex; flex-wrap: wrap; gap: 8px; }
+  .project-checks label { display: flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 7px; padding: 7px 10px; font-size: 12.5px; color: var(--text); cursor: pointer; }
+  .project-checks input { width: auto; }
+
+  /* ---------- usage panel ---------- */
+  .usage-block { margin-bottom: 18px; }
+  .usage-block h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 8px; }
+  pre.cmd {
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 12px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tab { padding: 8px 14px; border-radius: 7px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); min-height: 36px; }
+  .tab.active { color: var(--text); border-color: var(--accent); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="card">
+    <h1>env-vault</h1>
+    <p class="muted">Your personal secrets manager</p>
+    <div class="field">
+      <label for="loginPassword">Password</label>
+      <input type="password" id="loginPassword" autocomplete="new-password" data-lpignore="true" data-1p-ignore data-bwignore>
+    </div>
+    <button id="loginBtn" style="width:100%;">Log in</button>
+    <div class="error" id="loginError"></div>
+  </div>
+</div>
+
+<div id="app">
+  <header id="topbar">
+    <h1>env-vault</h1>
+    <input type="search" id="searchInput" placeholder="search key, value, or project…">
+    <div class="spacer"></div>
+    <button class="ghost small" id="usageBtn">Usage</button>
+    <button class="ghost small" id="logoutBtn">Log out</button>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <div class="chips-scroll" id="projectChips"></div>
+    </div>
+
+    <div id="rows"></div>
+    <div class="empty" id="emptyMsg" hidden>No matching variables yet.</div>
+  </main>
+
+  <div id="fabBar">
+    <button class="ghost" id="newProjectBtn">+ Project</button>
+    <button id="newVarBtn">+ Variable</button>
+  </div>
+</div>
+
+<!-- Variable modal -->
+<div class="modal-backdrop" id="varModalBackdrop">
+  <div class="modal">
+    <h2 id="varModalTitle">Add variable</h2>
+    <div class="field">
+      <label for="varKeyInput">Key</label>
+      <input type="text" id="varKeyInput" placeholder="DATABASE_URL" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="varValInput">Value</label>
+      <textarea id="varValInput" placeholder="the real value" autocomplete="off"></textarea>
+    </div>
+    <div class="field">
+      <label>Used by which project(s)?</label>
+      <div class="project-checks" id="varProjectChecks"></div>
+    </div>
+    <div class="error" id="varModalError"></div>
+    <div class="modal-actions">
+      <button class="ghost" id="varModalCancel">Cancel</button>
+      <button id="varModalSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Project modal -->
+<div class="modal-backdrop" id="projModalBackdrop">
+  <div class="modal">
+    <h2>New project</h2>
+    <div class="field">
+      <label for="projNameInput">Name</label>
+      <input type="text" id="projNameInput" placeholder="my-api" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="projDescInput">Description (optional)</label>
+      <input type="text" id="projDescInput" placeholder="What this project is" autocomplete="off">
+    </div>
+    <div class="error" id="projModalError"></div>
+    <div class="modal-actions">
+      <button class="ghost" id="projModalCancel">Cancel</button>
+      <button id="projModalSave">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Usage modal -->
+<div class="modal-backdrop" id="usageModalBackdrop">
+  <div class="modal" style="max-width:640px;">
+    <h2>Use this vault from any project</h2>
+    <p class="muted">No cloning, no local files. Any machine that has the <code>envvault</code> script installed and logged in can pull a project's variables directly from this vault at runtime.</p>
+
+    <div class="usage-block">
+      <h3>One-time setup (per machine, container, or CI runner)</h3>
+      <pre class="cmd" id="usageInstall"></pre>
+    </div>
+
+    <div class="usage-block">
+      <label for="usageProjectSelect">Show usage for project</label>
+      <select id="usageProjectSelect" style="width:100%; background:var(--panel-2); color:var(--text); border:1px solid var(--border); border-radius:7px; padding:9px;"></select>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-lang="node">Node.js</button>
+      <button class="tab" data-lang="spring">Spring Boot</button>
+      <button class="tab" data-lang="python">Python</button>
+      <button class="tab" data-lang="docker">Docker</button>
+    </div>
+    <pre class="cmd" id="usageSnippet"></pre>
+
+    <div class="modal-actions">
+      <button class="ghost" id="usageModalClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const API = "";
+let VARS = [];
+let PROJECTS = [];
+let activeProject = "__all__";
+let revealed = new Set();
+let editingKey = null;
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+  });
+  if (res.status === 401) {
+    showLogin();
+    throw new Error("unauthorized");
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "request failed");
+  return data;
+}
+
+function showLogin() {
+  $("app").classList.remove("visible");
+  $("loginScreen").style.display = "flex";
+}
+function showApp() {
+  $("loginScreen").style.display = "none";
+  $("app").classList.add("visible");
+}
+
+async function boot() {
+  try {
+    await api("/api/whoami");
+    showApp();
+    await refreshAll();
+  } catch {
+    showLogin();
+  }
+}
+
+$("loginBtn").onclick = async () => {
+  const password = $("loginPassword").value;
+  $("loginPassword").value = "";
+  $("loginError").textContent = "";
+  try {
+    await fetch(API + "/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    }).then(async (res) => {
+      if (!res.ok) throw new Error((await res.json()).error || "login failed");
+    });
+    showApp();
+    await refreshAll();
+  } catch (e) {
+    $("loginError").textContent = e.message;
+  }
+};
+$("loginPassword").addEventListener("keydown", (e) => { if (e.key === "Enter") $("loginBtn").click(); });
+
+$("logoutBtn").onclick = async () => {
+  await api("/api/logout", { method: "POST" });
+  showLogin();
+};
+
+async function refreshAll() {
+  [VARS, PROJECTS] = await Promise.all([api("/api/vars"), api("/api/projects")]);
+  renderChips();
+  render();
+}
+
+function renderChips() {
+  const wrap = $("projectChips");
+  wrap.innerHTML = "";
+  const mk = (label, value) => {
+    const b = document.createElement("button");
+    b.className = "chip" + (activeProject === value ? " active" : "");
+    b.textContent = label;
+    b.onclick = () => { activeProject = value; renderChips(); render(); };
+    return b;
+  };
+  wrap.appendChild(mk("All", "__all__"));
+  wrap.appendChild(mk("Shared", "__shared__"));
+  for (const p of PROJECTS) wrap.appendChild(mk(p.name, p.name));
+}
+
+function matches(v, query) {
+  if (activeProject === "__shared__" && v.projects.length < 2) return false;
+  if (activeProject !== "__all__" && activeProject !== "__shared__" && !v.projects.includes(activeProject)) return false;
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return v.key.toLowerCase().includes(q) || v.value.toLowerCase().includes(q) || v.projects.some((p) => p.toLowerCase().includes(q));
+}
+
+function render() {
+  const query = $("searchInput").value.trim();
+  const rows = $("rows");
+  rows.innerHTML = "";
+  let shown = 0;
+
+  for (const v of VARS) {
+    if (!matches(v, query)) continue;
+    shown++;
+    const isRevealed = revealed.has(v.key);
+    const row = document.createElement("div");
+    row.className = "var-row";
+
+    const keyEl = document.createElement("div");
+    keyEl.className = "var-key";
+    keyEl.textContent = v.key;
+
+    const valEl = document.createElement("div");
+    valEl.className = "var-val" + (isRevealed ? " revealed" : "");
+    valEl.textContent = isRevealed ? v.value : "•".repeat(Math.min(v.value.length, 24) || 8);
+
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+    const revealBtn = document.createElement("button");
+    revealBtn.className = "ghost small";
+    revealBtn.textContent = isRevealed ? "Hide" : "Reveal";
+    revealBtn.onclick = () => { isRevealed ? revealed.delete(v.key) : revealed.add(v.key); render(); };
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "ghost small";
+    copyBtn.textContent = "Copy";
+    copyBtn.onclick = async () => { await navigator.clipboard.writeText(v.value); copyBtn.textContent = "Copied"; setTimeout(() => (copyBtn.textContent = "Copy"), 1000); };
+    const editBtn = document.createElement("button");
+    editBtn.className = "ghost small";
+    editBtn.textContent = "Edit";
+    editBtn.onclick = () => openVarModal(v);
+    const delBtn = document.createElement("button");
+    delBtn.className = "danger small";
+    delBtn.textContent = "Delete";
+    delBtn.onclick = () => deleteVar(v.key);
+    actions.append(revealBtn, copyBtn, editBtn, delBtn);
+
+    const badges = document.createElement("div");
+    badges.className = "var-badges";
+    if (v.projects.length === 0) {
+      badges.innerHTML = '<span class="badge">untagged</span>';
+    } else {
+      badges.innerHTML = v.projects.map((p) => `<span class="badge${v.projects.length > 1 ? " shared" : ""}">${p}</span>`).join("");
+    }
+
+    row.append(keyEl, valEl, actions, badges);
+    rows.appendChild(row);
+  }
+  $("emptyMsg").hidden = shown !== 0;
+}
+$("searchInput").oninput = render;
+
+// ---------- variable modal ----------
+function openVarModal(v) {
+  editingKey = v ? v.key : null;
+  $("varModalTitle").textContent = v ? `Edit ${v.key}` : "Add variable";
+  $("varKeyInput").value = v ? v.key : "";
+  $("varKeyInput").disabled = !!v;
+  $("varValInput").value = v ? v.value : "";
+  $("varModalError").textContent = "";
+  const checks = $("varProjectChecks");
+  checks.innerHTML = "";
+  for (const p of PROJECTS) {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = p.id;
+    cb.checked = v ? v.projects.includes(p.name) : false;
+    label.appendChild(cb);
+    label.append(p.name);
+    checks.appendChild(label);
+  }
+  $("varModalBackdrop").classList.add("visible");
+}
+$("newVarBtn").onclick = () => openVarModal(null);
+$("varModalCancel").onclick = () => $("varModalBackdrop").classList.remove("visible");
+$("varModalSave").onclick = async () => {
+  const key = $("varKeyInput").value.trim();
+  const value = $("varValInput").value;
+  const projectIds = [...$("varProjectChecks").querySelectorAll("input:checked")].map((cb) => cb.value);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) { $("varModalError").textContent = "key must look like AN_ENV_VAR_NAME"; return; }
+  try {
+    await api("/api/vars", { method: "POST", body: JSON.stringify({ key, value, projects: projectIds }) });
+    $("varModalBackdrop").classList.remove("visible");
+    await refreshAll();
+  } catch (e) {
+    $("varModalError").textContent = e.message;
+  }
+};
+async function deleteVar(key) {
+  if (!confirm(`Delete ${key}? This can't be undone.`)) return;
+  await api(`/api/vars/${encodeURIComponent(key)}`, { method: "DELETE" });
+  await refreshAll();
+}
+
+// ---------- project modal ----------
+$("newProjectBtn").onclick = () => {
+  $("projNameInput").value = "";
+  $("projDescInput").value = "";
+  $("projModalError").textContent = "";
+  $("projModalBackdrop").classList.add("visible");
+};
+$("projModalCancel").onclick = () => $("projModalBackdrop").classList.remove("visible");
+$("projModalSave").onclick = async () => {
+  const name = $("projNameInput").value.trim().toLowerCase();
+  const description = $("projDescInput").value.trim();
+  try {
+    await api("/api/projects", { method: "POST", body: JSON.stringify({ name, description }) });
+    $("projModalBackdrop").classList.remove("visible");
+    await refreshAll();
+  } catch (e) {
+    $("projModalError").textContent = e.message;
+  }
+};
+
+// ---------- usage modal ----------
+const SNIPPETS = {
+  node: (p) => `envvault run ${p} -- node server.js\nenvvault run ${p} -- npm run dev`,
+  spring: (p) => `envvault run ${p} -- ./mvnw spring-boot:run\nenvvault run ${p} -- java -jar target/app.jar`,
+  python: (p) => `envvault run ${p} -- python manage.py runserver\nenvvault run ${p} -- uvicorn app.main:app --reload`,
+  docker: (p) => `# Dockerfile\nRUN curl -fsS ${location.origin}/install.sh | sh\nCMD ["envvault", "run", "${p}", "--", "node", "server.js"]`,
+};
+let usageLang = "node";
+function renderUsage() {
+  const p = $("usageProjectSelect").value || "your-project";
+  $("usageSnippet").textContent = SNIPPETS[usageLang](p);
+}
+$("usageBtn").onclick = () => {
+  $("usageInstall").textContent = `curl -fsS ${location.origin}/install.sh | sh\nenvvault login   # paste this vault's URL + your personal API token when asked`;
+  const sel = $("usageProjectSelect");
+  sel.innerHTML = PROJECTS.map((p) => `<option value="${p.name}">${p.name}</option>`).join("") || `<option value="your-project">your-project</option>`;
+  renderUsage();
+  $("usageModalBackdrop").classList.add("visible");
+};
+$("usageModalClose").onclick = () => $("usageModalBackdrop").classList.remove("visible");
+$("usageProjectSelect").onchange = renderUsage;
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.onclick = () => {
+    document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+    usageLang = tab.dataset.lang;
+    renderUsage();
+  };
+});
+
+// close modals on backdrop click
+document.querySelectorAll(".modal-backdrop").forEach((bd) => {
+  bd.addEventListener("click", (e) => { if (e.target === bd) bd.classList.remove("visible"); });
+});
+
+boot();
+</script>
+</body>
+</html>
