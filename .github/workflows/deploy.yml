@@ -1,0 +1,26 @@
+name: Deploy
+
+# This repo (env-vault-backend) deploys itself on every push. It's a
+# standalone module: the Cloudflare Worker API + D1-backed dashboard +
+# envvault CLI, linked into the parent env-vault repo as a git submodule.
+# All real secrets (ENCRYPTION_KEY, SESSION_SECRET, API_TOKEN,
+# DASHBOARD_PASSWORD) live in Cloudflare, set via `wrangler secret put` --
+# this workflow only ships code.
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g wrangler
+      - run: wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
