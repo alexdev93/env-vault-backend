@@ -428,7 +428,11 @@ function render() {
 
     const valEl = document.createElement("div");
     valEl.className = "var-val" + (isRevealed ? " revealed" : "");
-    valEl.textContent = isRevealed ? v.value : "•".repeat(Math.min(v.value.length, 24) || 8);
+    if (v.value.length === 0) {
+      valEl.textContent = "(empty)";
+    } else {
+      valEl.textContent = isRevealed ? v.value : "•".repeat(Math.min(v.value.length, 24));
+    }
 
     const actions = document.createElement("div");
     actions.className = "row-actions";
