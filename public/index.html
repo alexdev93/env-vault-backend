@@ -155,6 +155,8 @@
   #app.visible { display: block; animation: fadeIn 300ms var(--ease); }
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+  :root { --content-w: 880px; }
+
   header#topbar {
     position: sticky;
     top: 0;
@@ -164,13 +166,18 @@
     backdrop-filter: blur(14px) saturate(1.4);
     -webkit-backdrop-filter: blur(14px) saturate(1.4);
     border-bottom: 1px solid var(--border);
+    padding: 0 20px;
+  }
+  .bar-inner {
+    max-width: var(--content-w);
+    margin: 0 auto;
+    height: 100%;
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 0 16px;
   }
   header#topbar .spacer { flex: 1; }
-  .search-wrap { position: relative; max-width: 320px; width: 100%; }
+  .search-wrap { position: relative; flex: 1; min-width: 140px; max-width: 380px; }
   .search-wrap svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--muted-2); pointer-events: none; }
   #searchInput { padding-left: 34px; }
   kbd {
@@ -179,8 +186,9 @@
     background: var(--panel-3); border: 1px solid var(--border); border-radius: 4px;
     padding: 1px 5px;
   }
+  @media (max-width: 460px) { kbd { display: none; } }
 
-  main { max-width: 1080px; margin: 0 auto; padding: 20px; padding-bottom: 100px; }
+  main { max-width: var(--content-w); margin: 0 auto; padding: 24px 20px; padding-bottom: 110px; }
 
   .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
   .chip {
@@ -256,12 +264,10 @@
     backdrop-filter: blur(14px) saturate(1.4);
     -webkit-backdrop-filter: blur(14px) saturate(1.4);
     border-top: 1px solid var(--border);
-    padding: 10px 16px;
+    padding: 10px 20px;
     padding-bottom: max(10px, env(safe-area-inset-bottom));
-    display: flex;
-    gap: 10px;
-    justify-content: center;
   }
+  #fabBar .bar-inner { justify-content: center; gap: 10px; }
   #fabBar button { flex: 1; max-width: 220px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
 
   /* ---------- modals ---------- */
@@ -364,15 +370,17 @@
 
 <div id="app">
   <header id="topbar">
-    <div class="brand brand-text"><span class="mark" id="topbarIcon"></span> env-vault</div>
-    <div class="search-wrap">
-      <span id="searchIcon"></span>
-      <input type="search" id="searchInput" placeholder="search key, value, or project…">
-      <kbd>/</kbd>
+    <div class="bar-inner">
+      <div class="brand brand-text"><span class="mark" id="topbarIcon"></span> env-vault</div>
+      <div class="search-wrap">
+        <span id="searchIcon"></span>
+        <input type="search" id="searchInput" placeholder="search key, value, or project…">
+        <kbd>/</kbd>
+      </div>
+      <div class="spacer"></div>
+      <button class="ghost small" id="usageBtn"></button>
+      <button class="ghost small" id="logoutBtn"></button>
     </div>
-    <div class="spacer"></div>
-    <button class="ghost small" id="usageBtn"></button>
-    <button class="ghost small" id="logoutBtn"></button>
   </header>
 
   <main>
@@ -385,8 +393,10 @@
   </main>
 
   <div id="fabBar">
-    <button class="ghost" id="newProjectBtn"></button>
-    <button id="newVarBtn"></button>
+    <div class="bar-inner">
+      <button class="ghost" id="newProjectBtn"></button>
+      <button id="newVarBtn"></button>
+    </div>
   </div>
 </div>
 
