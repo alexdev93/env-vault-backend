@@ -71,6 +71,10 @@ async function handleApi(request, env, url) {
   const authErr = await requireAuth(request, env);
   if (authErr) return authErr;
 
+  if (pathname === "/api/token" && method === "GET") {
+    return json({ token: env.API_TOKEN, url: url.origin });
+  }
+
   if (pathname === "/api/vars" && method === "GET") {
     return json(await listVarsWithProjects(env));
   }

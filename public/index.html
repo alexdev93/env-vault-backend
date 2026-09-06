@@ -453,6 +453,15 @@
     <p class="muted">No cloning, no local files. Any machine that has the <code>envvault</code> script installed and logged in can pull a project's variables directly from this vault at runtime.</p>
 
     <div class="usage-block">
+      <h3>Your API token</h3>
+      <p class="muted" style="margin-top:0;">This is what <code>envvault login</code> asks for — not your dashboard password, and not the old vault's decryption key. One token works for every project and machine.</p>
+      <div class="cmd-wrap">
+        <pre class="cmd" id="usageToken">•••••••••••••••••••••••••••••••••••••••••••••••</pre>
+        <button class="ghost small icon-btn cmd-copy" id="revealTokenBtn" title="Reveal"></button>
+      </div>
+    </div>
+
+    <div class="usage-block">
       <h3>One-time setup (per machine, container, or CI runner)</h3>
       <div class="cmd-wrap">
         <pre class="cmd" id="usageInstall"></pre>
@@ -809,14 +818,41 @@ function renderUsage() {
   const p = $("usageProjectSelect").value || "your-project";
   $("usageSnippet").textContent = SNIPPETS[usageLang](p);
 }
+let revealedToken = null;
+$("revealTokenBtn").innerHTML = icon("eye", 15);
+$("revealTokenBtn").onclick = async () => {
+  if (revealedToken) {
+    await navigator.clipboard.writeText(revealedToken);
+    toast("Copied token");
+    return;
+  }
+  await withLoading($("revealTokenBtn"), async () => {
+    try {
+      const data = await api("/api/token");
+      revealedToken = data.token;
+      $("usageToken").textContent = data.token;
+      $("revealTokenBtn").innerHTML = icon("copy", 15);
+      $("revealTokenBtn").title = "Copy";
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+};
+
 $("usageBtn").onclick = () => {
-  $("usageInstall").textContent = `curl -fsS ${location.origin}/install.sh | sh\nenvvault login   # paste this vault's URL + your personal API token when asked`;
+  $("usageInstall").textContent = `curl -fsS ${location.origin}/install.sh | sh\nenvvault login   # paste this vault's URL + your API token (click "Reveal" above)`;
   const sel = $("usageProjectSelect");
   sel.innerHTML = PROJECTS.map((p) => `<option value="${p.name}">${p.name}</option>`).join("") || `<option value="your-project">your-project</option>`;
   renderUsage();
   $("usageModalBackdrop").classList.add("visible");
 };
-$("usageModalClose").onclick = () => $("usageModalBackdrop").classList.remove("visible");
+$("usageModalClose").onclick = () => {
+  $("usageModalBackdrop").classList.remove("visible");
+  revealedToken = null;
+  $("usageToken").textContent = "•".repeat(49);
+  $("revealTokenBtn").innerHTML = icon("eye", 15);
+  $("revealTokenBtn").title = "Reveal";
+};
 $("usageProjectSelect").onchange = renderUsage;
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.onclick = () => {
