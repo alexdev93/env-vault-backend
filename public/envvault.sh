@@ -19,8 +19,15 @@ EOF
 }
 
 require_config() {
+  # CI/CD and build environments (GitHub Actions, Vercel, Docker, ...) won't
+  # have run `envvault login` -- they set ENV_VAULT_URL/ENV_VAULT_TOKEN as
+  # ordinary secrets/env vars instead. Prefer those if already present.
+  if [ -n "${ENV_VAULT_TOKEN:-}" ]; then
+    : "${ENV_VAULT_URL:=$DEFAULT_URL}"
+    return
+  fi
   if [ ! -f "$CONFIG_FILE" ]; then
-    echo "envvault: not logged in yet. Run: envvault login" >&2
+    echo "envvault: not logged in yet. Run: envvault login (or set ENV_VAULT_TOKEN)" >&2
     exit 1
   fi
   # shellcheck disable=SC1090
