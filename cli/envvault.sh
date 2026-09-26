@@ -169,7 +169,7 @@ cmd_run() {
 
 cmd_get() {
   parse_args "$@"
-  [ "${#ARGS[@]}" -eq 2 ] && [ "$HAS_DASHDASH" -eq 0 ] || usage
+  if [ "${#ARGS[@]}" -ne 2 ] || [ "$HAS_DASHDASH" -ne 0 ]; then usage; fi
   require_config
   local json; json="$(fetch_env_json "${ARGS[0]}" "$BRANCH")"
   printf '%s' "$json" | json_to get "${ARGS[1]}"
@@ -177,7 +177,7 @@ cmd_get() {
 
 cmd_list() {
   parse_args "$@"
-  [ "${#ARGS[@]}" -eq 1 ] && [ "$HAS_DASHDASH" -eq 0 ] || usage
+  if [ "${#ARGS[@]}" -ne 1 ] || [ "$HAS_DASHDASH" -ne 0 ]; then usage; fi
   require_config
   local json; json="$(fetch_env_json "${ARGS[0]}" "$BRANCH")"
   printf '%s' "$json" | json_to keys
