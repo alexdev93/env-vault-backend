@@ -107,16 +107,20 @@ json_to() {
       if (mode === "exports") for (const [k, v] of Object.entries(d)) console.log(`export ${k}=${JSON.stringify(String(v))}`);
       else if (mode === "get") process.stdout.write(key in d ? String(d[key]) : "");
       else if (mode === "info") {
-        const line = (label, v) => v && console.log(`${label.padEnd(12)}${v}`);
-        line("project", d.name); line("description", d.description); line("repo", d.repo_url); line("site", d.site_url);
+        const line = (label, v) => v && console.log(`${label.padEnd(14)}${v}`);
+        line("project", d.name); line("status", d.status); line("description", d.description);
+        line("stack", d.stack); line("site", d.site_url); line("repo", d.repo_url);
+        for (const x of d.details ?? []) line(x.label, x.value);
         if (d.notes) console.log(`\nnotes:\n${d.notes}`);
         console.log(`\nvariables (default): ${d.keys.join(", ") || "none"}`);
         if (d.services.length) console.log("\nservices:");
         for (const s of d.services) {
-          console.log(`  ${[s.kind, s.provider].filter(Boolean).join(": ")}`);
-          line("    url", s.url); line("    account", s.account); line("    notes", s.notes);
+          console.log(`  ${[s.kind, s.provider, s.name].filter(Boolean).join(" · ")}`);
+          line("    url", s.url); line("    account", s.account);
+          line("    region", s.region); line("    plan", s.plan);
+          line("    provides", (s.var_keys ?? []).join(", ")); line("    notes", s.notes);
         }
-        if (d.branches.length) console.log("\nbranches:");
+        if (d.branches.length) console.log("\nbranches (use with -b):");
         for (const b of d.branches) {
           console.log(`  ${b.name}${b.notes ? `  (${b.notes})` : ""}`);
           for (const v of b.vars) console.log(`    ${v.key}${v.overrides ? " (overrides default)" : " (branch only)"}`);
@@ -135,15 +139,19 @@ elif mode == "get":
     print(str(d.get(key, "")), end="")
 elif mode == "info":
     def line(label, v):
-        if v: print(f"{label:<12}{v}")
-    line("project", d["name"]); line("description", d["description"]); line("repo", d["repo_url"]); line("site", d["site_url"])
+        if v: print(f"{label:<14}{v}")
+    line("project", d["name"]); line("status", d.get("status")); line("description", d["description"])
+    line("stack", d.get("stack")); line("site", d["site_url"]); line("repo", d["repo_url"])
+    for x in d.get("details") or []: line(x["label"], x["value"])
     if d["notes"]: print("\nnotes:\n" + d["notes"])
     print("\nvariables (default): " + (", ".join(d["keys"]) or "none"))
     if d["services"]: print("\nservices:")
     for s in d["services"]:
-        print("  " + ": ".join(x for x in (s["kind"], s["provider"]) if x))
-        line("    url", s["url"]); line("    account", s["account"]); line("    notes", s["notes"])
-    if d["branches"]: print("\nbranches:")
+        print("  " + " · ".join(x for x in (s["kind"], s["provider"], s.get("name")) if x))
+        line("    url", s["url"]); line("    account", s["account"])
+        line("    region", s.get("region")); line("    plan", s.get("plan"))
+        line("    provides", ", ".join(s.get("var_keys") or [])); line("    notes", s["notes"])
+    if d["branches"]: print("\nbranches (use with -b):")
     for b in d["branches"]:
         print("  " + b["name"] + ("  (" + b["notes"] + ")" if b["notes"] else ""))
         for v in b["vars"]: print("    " + v["key"] + (" (overrides default)" if v["overrides"] else " (branch only)"))
