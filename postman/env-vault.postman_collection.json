@@ -81,6 +81,225 @@
         "method": "GET",
         "url": "{{baseUrl}}/api/projects/{{project}}/env"
       }
+    },
+    {
+      "name": "Project env for a branch",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/projects/{{project}}/env?branch=main",
+        "description": "Defaults with the branch's overrides on top. 404 if the branch doesn't exist."
+      }
+    },
+    {
+      "name": "Get variable",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/vars/DATABASE_URL"
+      }
+    },
+    {
+      "name": "Edit variable",
+      "request": {
+        "method": "PATCH",
+        "url": "{{baseUrl}}/api/vars/DATABASE_URL",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"notes\": \"Neon main database\"\n}"
+        },
+        "description": "Any of key (rename), value, notes, projects."
+      }
+    },
+    {
+      "name": "Create project with details",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/projects",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"my-api\",\n  \"description\": \"API server\",\n  \"notes\": \"Deploys on push to main\",\n  \"repo_url\": \"https://github.com/me/my-api\",\n  \"site_url\": \"https://my-api.example.com\",\n  \"services\": [\n    {\n      \"kind\": \"database\",\n      \"provider\": \"neon\",\n      \"url\": \"https://console.neon.tech\",\n      \"account\": \"me@gmail.com\"\n    },\n    {\n      \"kind\": \"hosting\",\n      \"provider\": \"cloudflare\",\n      \"url\": \"https://dash.cloudflare.com\",\n      \"account\": \"me@gmail.com\"\n    }\n  ],\n  \"branches\": [\n    \"main\",\n    {\n      \"name\": \"staging\",\n      \"notes\": \"preview\"\n    }\n  ]\n}"
+        }
+      }
+    },
+    {
+      "name": "Get project",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/projects/{{project}}",
+        "description": "By id or name: details, services, branches with their variable names."
+      }
+    },
+    {
+      "name": "Edit project",
+      "request": {
+        "method": "PATCH",
+        "url": "{{baseUrl}}/api/projects/{{project}}",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"notes\": \"updated notes\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Delete project",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/api/projects/{{project}}"
+      }
+    },
+    {
+      "name": "Add service",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/projects/{{project}}/services",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"kind\": \"email\",\n  \"provider\": \"resend\",\n  \"account\": \"me@gmail.com\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Edit service",
+      "request": {
+        "method": "PATCH",
+        "url": "{{baseUrl}}/api/services/{{serviceId}}",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"notes\": \"free tier\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Delete service",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/api/services/{{serviceId}}"
+      }
+    },
+    {
+      "name": "Add branch",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/projects/{{project}}/branches",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"main\",\n  \"notes\": \"production\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Get branch",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/branches/{{branchId}}"
+      }
+    },
+    {
+      "name": "Edit branch",
+      "request": {
+        "method": "PATCH",
+        "url": "{{baseUrl}}/api/branches/{{branchId}}",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"production\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Delete branch",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/api/branches/{{branchId}}"
+      }
+    },
+    {
+      "name": "Set branch variable",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/branches/{{branchId}}/vars",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"key\": \"DATABASE_URL\",\n  \"value\": \"postgres://...\",\n  \"notes\": \"prod db\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Get branch variable value",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/branches/{{branchId}}/vars/DATABASE_URL/value"
+      }
+    },
+    {
+      "name": "Edit branch variable",
+      "request": {
+        "method": "PATCH",
+        "url": "{{baseUrl}}/api/branches/{{branchId}}/vars/DATABASE_URL",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"notes\": \"rotated 2026-09\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Delete branch variable",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/api/branches/{{branchId}}/vars/DATABASE_URL"
+      }
     }
   ]
 }

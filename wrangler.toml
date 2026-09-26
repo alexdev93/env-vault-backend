@@ -7,6 +7,7 @@ account_id = "62e38740a6a2d2fd5ebf0834d7b2c4ff"
 binding = "DB"
 database_name = "env-vault-db"
 database_id = "d7eef25d-d368-4f84-94bd-bb02aff03a4e"
+migrations_dir = "migrations"
 
 # Static files served for every non-/api path. `npm run assets` builds dist/
 # from cli/*.sh plus the dashboard build (WEB_DIST), which the env-vault root

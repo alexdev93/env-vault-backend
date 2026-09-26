@@ -8,7 +8,8 @@
     "dev": "wrangler dev --port 8787",
     "pretest": "[ -d dist ] || npm run assets",
     "test": "node test/smoke.mjs",
-    "db:init": "wrangler d1 execute env-vault-db --local --file=schema.sql",
+    "db:init": "wrangler d1 migrations apply env-vault-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply env-vault-db --remote",
     "deploy": "if [ ! -f dist/index.html ]; then echo 'dist/ has no dashboard. Deploy from the env-vault root repo (npm run deploy).' >&2; exit 1; fi && wrangler deploy"
   },
   "devDependencies": {
