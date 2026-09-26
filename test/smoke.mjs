@@ -84,8 +84,12 @@ try {
   check("POST /api/vars saves an encrypted value", saved.status === 200);
   const list = await (await fetch(BASE + "/api/vars", withCookie())).json();
   const row = list.find((v) => v.key === "SMOKE_URL");
-  check("GET /api/vars decrypts it back exactly", row?.value === secret, JSON.stringify(row));
-  check("GET /api/vars links it to the project", row?.projects?.[0] === "smoke-app");
+  check("GET /api/vars lists names without values", !!row && !("value" in row) && row.type === "var", JSON.stringify(row));
+  check("GET /api/vars links it to the project", row?.projects?.[0] === "smoke-app" && row?.shared === false);
+  const val = await fetch(BASE + "/api/vars/SMOKE_URL/value", withCookie());
+  check("GET /api/vars/:key/value decrypts it back exactly", val.status === 200 && (await val.json()).value === secret);
+  check("GET /api/vars/:key/value unknown key → 404", (await fetch(BASE + "/api/vars/NOPE/value", withCookie())).status === 404);
+  check("GET /api/vars/:key/value without auth → 401", (await fetch(BASE + "/api/vars/SMOKE_URL/value")).status === 401);
 
   // CLI flow (bearer token)
   const bearer = { headers: { Authorization: `Bearer ${SECRETS.API_TOKEN}` } };

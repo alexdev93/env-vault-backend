@@ -32,8 +32,10 @@ async function requireAuth(request, env) {
   return null;
 }
 
+// Names and metadata only: values are fetched one at a time, per reveal or copy
+// (GET /api/vars/:key/value), so the dashboard never holds every secret at once.
 async function listVarsWithProjects(env) {
-  const vars = await env.DB.prepare("SELECT key, enc_blob, updated_at FROM vars ORDER BY key").all();
+  const vars = await env.DB.prepare("SELECT key, updated_at FROM vars ORDER BY key").all();
   const links = await env.DB.prepare("SELECT project_id, var_key FROM project_vars").all();
   const projects = await env.DB.prepare("SELECT id, name FROM projects").all();
   const nameById = Object.fromEntries(projects.results.map((p) => [p.id, p.name]));
@@ -41,16 +43,10 @@ async function listVarsWithProjects(env) {
   for (const l of links.results) {
     (projectsByKey[l.var_key] ||= []).push(nameById[l.project_id]);
   }
-  const out = [];
-  for (const v of vars.results) {
-    out.push({
-      key: v.key,
-      value: await decryptValue(env, v.enc_blob),
-      updated_at: v.updated_at,
-      projects: (projectsByKey[v.key] || []).filter(Boolean).sort(),
-    });
-  }
-  return out;
+  return vars.results.map((v) => {
+    const projects = (projectsByKey[v.key] || []).filter(Boolean).sort();
+    return { key: v.key, type: "var", projects, updated_at: v.updated_at, shared: projects.length > 1 };
+  });
 }
 
 async function handleApi(request, env, url) {
@@ -107,6 +103,14 @@ async function handleApi(request, env, url) {
       ),
     ]);
     return json({ ok: true, key });
+  }
+
+  const valueMatch = pathname.match(/^\/api\/vars\/([^/]+)\/value$/);
+  if (valueMatch && method === "GET") {
+    const key = decodeURIComponent(valueMatch[1]);
+    const row = await env.DB.prepare("SELECT enc_blob FROM vars WHERE key = ?1").bind(key).first();
+    if (!row) return err("no such variable", 404);
+    return json({ value: await decryptValue(env, row.enc_blob) }, 200, { "Cache-Control": "no-store" });
   }
 
   const varMatch = pathname.match(/^\/api\/vars\/([^/]+)$/);

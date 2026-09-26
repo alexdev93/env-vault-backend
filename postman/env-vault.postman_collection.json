@@ -56,7 +56,16 @@
       "name": "List variables",
       "request": {
         "method": "GET",
-        "url": "{{baseUrl}}/api/vars"
+        "url": "{{baseUrl}}/api/vars",
+        "description": "Names and metadata only ({key, type, projects, updated_at, shared}). Use Get variable value for a value."
+      }
+    },
+    {
+      "name": "Get variable value",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/vars/DATABASE_URL/value",
+        "description": "Returns {value} for one variable. The dashboard calls this per reveal or copy."
       }
     },
     {
