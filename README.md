@@ -91,16 +91,26 @@ To rotate a secret, run `printf '%s' "$NEWVALUE" | npx wrangler secret put NAME`
 
 - **vars**: a variable's default value (encrypted) and notes, linked to
   any number of projects through **project_vars**.
-- **projects**: name, description, notes, `repo_url`, `site_url`.
+- **projects**: name, description, notes, `repo_url`, `site_url`, `status`
+  (idea, building, live, maintenance, archived), `stack`, and free-form
+  `details` (`[{label, value}]`).
 - **services**: where a project's pieces live, e.g. `{kind: "database",
-  provider: "neon", url: "https://console.neon.tech", account: "you@gmail.com"}`
-  or `{kind: "hosting", provider: "cloudflare", ...}`.
+  provider: "neon", name: "my-db", url: "https://console.neon.tech",
+  account: "you@gmail.com", region, plan}`, plus **service_vars**: which
+  variables each one provides (`var_keys`).
 - **branches**: a project's branches (`main`, `feature/x`, ...) with notes.
 - **branch_vars**: per-branch values (encrypted) that override or add to the
   project's defaults.
+- **items**: the personal vault: logins (`url`, `username`, password),
+  secure notes and secrets, optionally linked to a project.
+- **value_history**: the last 5 replaced values (encrypted) of every
+  variable, branch value and item. Saving an unchanged value adds nothing;
+  renames carry the history along; deleting something deletes its history.
 
-Only values are encrypted. Notes, URLs and service details are stored as
-plain text, so keep passwords and keys in variables, not in notes.
+Only values are encrypted (variables, branch values, item passwords/notes/
+secrets, and their history). Titles, notes, URLs, usernames and service
+details are stored as plain text, so keep passwords and keys in values, not
+in notes.
 
 ## Database
 
@@ -136,18 +146,25 @@ routes change only the fields you send.
 | `GET /api/vars/:key/value` | the decrypted value |
 | `DELETE /api/vars/:key` | delete it |
 | `GET /api/projects` | every project with keys, services, branches |
-| `POST /api/projects` | `{name, description?, notes?, repo_url?, site_url?, services?: [...], branches?: ["main", {name, notes}]}` |
+| `POST /api/projects` | `{name, description?, notes?, repo_url?, site_url?, status?, stack?, details?, services?: [...], branches?: ["main", {name, notes}]}` |
 | `GET /api/projects/:project` | full details, including each branch's variables |
-| `PATCH /api/projects/:project` | `{name?, description?, notes?, repo_url?, site_url?}` |
+| `PATCH /api/projects/:project` | `{name?, description?, notes?, repo_url?, site_url?, status?, stack?, details?}` |
 | `DELETE /api/projects/:project` | deletes it with its services and branches (variables stay) |
 | `GET /api/projects/:name/env[?branch=B]` | what `envvault` calls: the decrypted map |
-| `POST /api/projects/:project/services` | `{kind?, provider?, url?, account?, notes?}` (kind or provider required) |
-| `PATCH` / `DELETE /api/services/:id` | edit / delete a service |
+| `POST /api/projects/:project/services` | `{kind?, provider?, name?, url?, account?, region?, plan?, notes?, var_keys?}` (kind or provider required) |
+| `PATCH` / `DELETE /api/services/:id` | edit (same fields; `var_keys` replaces the links) / delete a service |
 | `POST /api/projects/:project/branches` | `{name, notes?}` |
 | `GET` / `PATCH` / `DELETE /api/branches/:id` | branch details (variable names, `overrides` flag) / `{name?, notes?}` / delete |
 | `POST /api/branches/:id/vars` | upsert `{key, value, notes?}` (value optional when the key exists) |
 | `PATCH` / `DELETE /api/branches/:id/vars/:key` | `{key?, value?, notes?}` / delete |
 | `GET /api/branches/:id/vars/:key/value` | the decrypted branch value |
+| `GET /api/items` | personal items, metadata only |
+| `POST /api/items` | `{type: login\|note\|secret, title, value, url?, username?, notes?, project_id?}` |
+| `PATCH` / `DELETE /api/items/:id` | `{title?, url?, username?, notes?, project_id?, value?}` / delete |
+| `GET /api/items/:id/value` | the decrypted password, note or secret |
+| `GET /api/history?owner=O` | `[{id, created_at}]`, newest first; `O` is `var:KEY`, `branch:ID:KEY` or `item:ID` |
+| `GET /api/history/:id/value` | one earlier value, decrypted |
+| `POST /api/history/:id/restore` | put it back; the value it replaces goes into history |
 
 ## Adding an API endpoint
 

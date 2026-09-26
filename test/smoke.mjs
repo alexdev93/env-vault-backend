@@ -205,6 +205,87 @@ try {
     (await send("DELETE", "/api/projects/smoke-full")).status === 200 && (await getJson("/api/projects")).length === 1);
   for (const k of ["DATABASE_URL", "LOG_LEVEL"]) await send("DELETE", `/api/vars/${k}`);
 
+  // value history: the last 5 replaced values, oldest dropped first
+  const hist = async (owner) => getJson(`/api/history?owner=${encodeURIComponent(owner)}`);
+  await send("POST", "/api/vars", { key: "HIST_KEY", value: "v0" });
+  check("a new variable has no history", (await hist("var:HIST_KEY")).length === 0);
+  await send("POST", "/api/vars", { key: "HIST_KEY", value: "v0" });
+  check("saving the same value adds no history", (await hist("var:HIST_KEY")).length === 0);
+  for (let i = 1; i <= 6; i++) await send("PATCH", "/api/vars/HIST_KEY", { value: `v${i}` });
+  let h = await hist("var:HIST_KEY");
+  check("history keeps only the last 5 values", h.length === 5, JSON.stringify(h));
+  const histValues = [];
+  for (const e of h) histValues.push((await getJson(`/api/history/${e.id}/value`)).value);
+  check("… newest first, oldest (v0) dropped", histValues.join(",") === "v5,v4,v3,v2,v1", histValues.join(","));
+  check("PATCH notes only adds no history",
+    (await send("PATCH", "/api/vars/HIST_KEY", { notes: "n" })).status === 200 && (await hist("var:HIST_KEY")).length === 5);
+  const restore = await send("POST", `/api/history/${h[3].id}/restore`, {});
+  check("POST /api/history/:id/restore puts v2 back",
+    restore.status === 200 && (await getJson("/api/vars/HIST_KEY/value")).value === "v2");
+  h = await hist("var:HIST_KEY");
+  const afterRestore = [];
+  for (const e of h) afterRestore.push((await getJson(`/api/history/${e.id}/value`)).value);
+  check("… and v6 goes into history in its place", afterRestore.join(",") === "v6,v5,v4,v3,v1", afterRestore.join(","));
+  await send("PATCH", "/api/vars/HIST_KEY", { key: "HIST_RENAMED" });
+  check("history follows a rename", (await hist("var:HIST_RENAMED")).length === 5 && (await hist("var:HIST_KEY")).length === 0);
+  await send("DELETE", "/api/vars/HIST_RENAMED");
+  check("deleting a variable deletes its history", (await hist("var:HIST_RENAMED")).length === 0);
+  check("GET /api/history bad owner → 400", (await fetch(BASE + "/api/history?owner=nope", withCookie())).status === 400);
+
+  // branch value history, project status/stack/details, services linked to variables
+  const hp = await (await send("POST", "/api/projects", {
+    name: "smoke-hist", status: "live", stack: "Node 22", branches: ["main"],
+    details: [{ label: "Deploy", value: "npm run deploy" }, { label: "", value: "" }],
+  })).json();
+  check("POST /api/projects with status/stack/details", hp.ok === true, JSON.stringify(hp));
+  check("POST /api/projects bad status → 400", (await send("POST", "/api/projects", { name: "smoke-bad2", status: "nope" })).status === 400);
+  await send("POST", "/api/vars", { key: "SMOKE_DB", value: "d", projects: [hp.id] });
+  let hd = await getJson("/api/projects/smoke-hist");
+  check("details are stored as a list, blanks dropped", hd.details.length === 1 && hd.details[0].value === "npm run deploy" && hd.status === "live");
+  check("PATCH status + details", (await send("PATCH", "/api/projects/smoke-hist", { status: "maintenance", details: [] })).status === 200 &&
+    (await getJson("/api/projects/smoke-hist")).details.length === 0);
+  const hsvc = await (await send("POST", "/api/projects/smoke-hist/services", {
+    kind: "database", provider: "neon", name: "smoke-db", region: "eu-central-1", plan: "free", var_keys: ["SMOKE_DB"],
+  })).json();
+  hd = await getJson("/api/projects/smoke-hist");
+  check("services store name/region/plan and linked var_keys",
+    hd.services[0]?.region === "eu-central-1" && hd.services[0]?.var_keys?.[0] === "SMOKE_DB", JSON.stringify(hd.services));
+  check("POST service with a bad var key → 400", (await send("POST", "/api/projects/smoke-hist/services", { kind: "x", var_keys: ["1bad"] })).status === 400);
+  await send("PATCH", "/api/vars/SMOKE_DB", { key: "SMOKE_DATABASE" });
+  check("service links follow a variable rename",
+    (await getJson("/api/projects/smoke-hist")).services[0].var_keys[0] === "SMOKE_DATABASE");
+  check("PATCH service var_keys", (await send("PATCH", `/api/services/${hsvc.id}`, { var_keys: [] })).status === 200 &&
+    (await getJson("/api/projects/smoke-hist")).services[0].var_keys.length === 0);
+  const hMain = hd.branches[0].id;
+  await send("POST", `/api/branches/${hMain}/vars`, { key: "SMOKE_DATABASE", value: "b1" });
+  await send("POST", `/api/branches/${hMain}/vars`, { key: "SMOKE_DATABASE", value: "b2" });
+  await send("PATCH", `/api/branches/${hMain}/vars/SMOKE_DATABASE`, { value: "b3" });
+  check("branch values keep history", (await hist(`branch:${hMain}:SMOKE_DATABASE`)).length === 2);
+  await send("PATCH", `/api/branches/${hMain}/vars/SMOKE_DATABASE`, { key: "SMOKE_B" });
+  check("branch history follows a branch-var rename", (await hist(`branch:${hMain}:SMOKE_B`)).length === 2);
+  await send("DELETE", `/api/branches/${hMain}`);
+  check("deleting a branch deletes its history", (await hist(`branch:${hMain}:SMOKE_B`)).length === 0);
+
+  // personal items
+  const loginItem = await (await send("POST", "/api/items", {
+    type: "login", title: "Neon console", url: "console.neon.tech", username: "me@example.com", value: "pw1", project_id: hp.id,
+  })).json();
+  check("POST /api/items creates a login", loginItem.ok === true, JSON.stringify(loginItem));
+  check("POST /api/items bad type → 400", (await send("POST", "/api/items", { type: "card", title: "x", value: "1" })).status === 400);
+  check("POST /api/items without title → 400", (await send("POST", "/api/items", { type: "note", value: "1" })).status === 400);
+  const items = await getJson("/api/items");
+  check("GET /api/items lists metadata, no values, with project name",
+    items[0]?.title === "Neon console" && !("value" in items[0]) && !("enc_blob" in items[0]) && items[0].project === "smoke-hist", JSON.stringify(items));
+  check("GET /api/items/:id/value", (await getJson(`/api/items/${loginItem.id}/value`)).value === "pw1");
+  await send("PATCH", `/api/items/${loginItem.id}`, { value: "pw2", title: "Neon" });
+  check("PATCH /api/items/:id value keeps history",
+    (await getJson(`/api/items/${loginItem.id}/value`)).value === "pw2" && (await hist(`item:${loginItem.id}`)).length === 1);
+  await send("DELETE", "/api/projects/smoke-hist");
+  check("deleting a project unlinks its items, keeps them", (await getJson("/api/items"))[0]?.project_id === null);
+  check("DELETE /api/items/:id", (await send("DELETE", `/api/items/${loginItem.id}`)).status === 200 &&
+    (await getJson("/api/items")).length === 0 && (await hist(`item:${loginItem.id}`)).length === 0);
+  await send("DELETE", "/api/vars/SMOKE_DATABASE");
+
   // cleanup routes
   check("DELETE /api/vars/:key → 200", (await fetch(BASE + "/api/vars/SMOKE_URL", withCookie({ method: "DELETE" }))).status === 200);
   check("DELETE /api/projects/:id → 200", (await fetch(BASE + `/api/projects/${proj.id}`, withCookie({ method: "DELETE" }))).status === 200);

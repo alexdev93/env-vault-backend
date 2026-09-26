@@ -300,6 +300,93 @@
         "method": "DELETE",
         "url": "{{baseUrl}}/api/branches/{{branchId}}/vars/DATABASE_URL"
       }
+    },
+    {
+      "name": "Value history",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/history?owner=var:DATABASE_URL",
+        "description": "Last 5 replaced values (ids + dates). Owners: var:KEY, branch:BRANCH_ID:KEY, item:ITEM_ID."
+      }
+    },
+    {
+      "name": "History value",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/history/{{historyId}}/value"
+      }
+    },
+    {
+      "name": "Restore history value",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/history/{{historyId}}/restore",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      }
+    },
+    {
+      "name": "List personal items",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/items"
+      }
+    },
+    {
+      "name": "Create login",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/items",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"login\",\n  \"title\": \"Neon console\",\n  \"url\": \"https://console.neon.tech\",\n  \"username\": \"me@gmail.com\",\n  \"value\": \"password\",\n  \"project_id\": null\n}"
+        }
+      }
+    },
+    {
+      "name": "Get item value",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/items/{{itemId}}/value"
+      }
+    },
+    {
+      "name": "Edit item",
+      "request": {
+        "method": "PATCH",
+        "url": "{{baseUrl}}/api/items/{{itemId}}",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"notes\": \"2FA on the authenticator app\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Delete item",
+      "request": {
+        "method": "DELETE",
+        "url": "{{baseUrl}}/api/items/{{itemId}}"
+      }
     }
   ]
 }

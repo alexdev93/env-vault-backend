@@ -16,6 +16,12 @@ const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/;
 const NOTES_MAX = 10000;
 const TEXT_MAX = 2000;
 
+// How many replaced values each variable, branch variable and item keeps.
+const HISTORY_KEEP = 5;
+const PROJECT_STATUSES = ["", "idea", "building", "live", "maintenance", "archived"];
+const ITEM_TYPES = ["login", "note", "secret"];
+const DETAILS_MAX = 40;
+
 class HttpError extends Error {
   constructor(message, status = 400) {
     super(message);
@@ -62,8 +68,11 @@ function pickText(body, limits) {
   return out;
 }
 
-const PROJECT_TEXT = { description: TEXT_MAX, notes: NOTES_MAX, repo_url: TEXT_MAX, site_url: TEXT_MAX };
-const SERVICE_TEXT = { kind: 100, provider: 200, url: TEXT_MAX, account: TEXT_MAX, notes: NOTES_MAX };
+const PROJECT_TEXT = { description: TEXT_MAX, notes: NOTES_MAX, repo_url: TEXT_MAX, site_url: TEXT_MAX, stack: 500 };
+const SERVICE_TEXT = {
+  kind: 100, provider: 200, name: 200, url: TEXT_MAX, account: TEXT_MAX, region: 100, plan: 100, notes: NOTES_MAX,
+};
+const ITEM_TEXT = { title: 200, url: TEXT_MAX, username: TEXT_MAX, notes: NOTES_MAX };
 
 function parseProjectName(value) {
   const name = String(value ?? "").trim().toLowerCase();
@@ -91,10 +100,130 @@ function parseService(body) {
   return fields;
 }
 
+// The variable keys a service provides, or null when not sent.
+function parseVarKeys(value) {
+  if (value === undefined) return null;
+  if (!Array.isArray(value)) throw new HttpError("var_keys must be a list of keys");
+  return [...new Set(value.map(parseKey))];
+}
+
+// Project status, stack and free-form details ([{label, value}]), from whichever were sent.
+function pickProjectExtras(body) {
+  const out = {};
+  if (body.status !== undefined) {
+    const status = String(body.status ?? "").trim().toLowerCase();
+    if (!PROJECT_STATUSES.includes(status)) throw new HttpError(`status must be one of: ${PROJECT_STATUSES.filter(Boolean).join(", ")}`);
+    out.status = status;
+  }
+  if (body.details !== undefined) {
+    if (!Array.isArray(body.details)) throw new HttpError("details must be a list of {label, value}");
+    const details = body.details
+      .map((d) => pickText(d && typeof d === "object" ? d : {}, { label: 200, value: TEXT_MAX }))
+      .filter((d) => d.label || d.value)
+      .map((d) => ({ label: d.label ?? "", value: d.value ?? "" }));
+    if (details.length > DETAILS_MAX) throw new HttpError(`at most ${DETAILS_MAX} details`);
+    out.details = JSON.stringify(details);
+  }
+  return out;
+}
+
+function parseDetails(text) {
+  try {
+    const d = JSON.parse(text || "[]");
+    return Array.isArray(d) ? d : [];
+  } catch {
+    return [];
+  }
+}
+
+// ---- value history ----
+// Whenever a value is replaced, the old one goes into value_history under its
+// owner ("var:KEY", "branch:BRANCH_ID:KEY", "item:ITEM_ID"), and only the
+// newest HISTORY_KEEP entries per owner are kept.
+
+const varOwner = (key) => `var:${key}`;
+const branchOwner = (branchId, key) => `branch:${branchId}:${key}`;
+const itemOwner = (id) => `item:${id}`;
+
+// Where each kind of owner keeps its current value.
+const OWNER_SQL = {
+  var: {
+    select: "SELECT enc_blob FROM vars WHERE key = ?1",
+    update: "UPDATE vars SET enc_blob = ?1, updated_at = ?2 WHERE key = ?3",
+  },
+  branch: {
+    select: "SELECT enc_blob FROM branch_vars WHERE branch_id = ?1 AND key = ?2",
+    update: "UPDATE branch_vars SET enc_blob = ?1, updated_at = ?2 WHERE branch_id = ?3 AND key = ?4",
+  },
+  item: {
+    select: "SELECT enc_blob FROM items WHERE id = ?1",
+    update: "UPDATE items SET enc_blob = ?1, updated_at = ?2 WHERE id = ?3",
+  },
+};
+
+function parseOwner(owner) {
+  const s = String(owner ?? "");
+  let m;
+  if ((m = s.match(/^var:([A-Za-z_][A-Za-z0-9_]*)$/))) return { kind: "var", params: [m[1]] };
+  if ((m = s.match(/^branch:([0-9a-f-]{36}):([A-Za-z_][A-Za-z0-9_]*)$/))) return { kind: "branch", params: [m[1], m[2]] };
+  if ((m = s.match(/^item:([0-9a-f-]{36})$/))) return { kind: "item", params: [m[1]] };
+  throw new HttpError("owner must look like var:KEY, branch:ID:KEY or item:ID");
+}
+
+// Statements that save oldBlob into owner's history, unless the value is unchanged.
+async function historyStmts(env, owner, oldBlob, newPlain) {
+  if (oldBlob == null) return [];
+  let same = false;
+  try {
+    same = (await decryptValue(env, oldBlob)) === newPlain;
+  } catch {
+    // unreadable old value: keep it anyway
+  }
+  if (same) return [];
+  return [
+    env.DB.prepare("INSERT INTO value_history (owner, enc_blob, created_at) VALUES (?1, ?2, ?3)").bind(owner, oldBlob, now()),
+    env.DB.prepare(
+      "DELETE FROM value_history WHERE owner = ?1 AND id NOT IN " +
+        "(SELECT id FROM value_history WHERE owner = ?1 ORDER BY id DESC LIMIT ?2)"
+    ).bind(owner, HISTORY_KEEP),
+  ];
+}
+
+// Statements that set owner's value to plain, recording the current one in history.
+async function setValueStmts(env, owner, plain) {
+  const { kind, params } = parseOwner(owner);
+  const row = await env.DB.prepare(OWNER_SQL[kind].select).bind(...params).first();
+  if (!row) throw new HttpError("it no longer exists", 404);
+  return [
+    ...(await historyStmts(env, owner, row.enc_blob, plain)),
+    env.DB.prepare(OWNER_SQL[kind].update).bind(await encryptValue(env, plain), now(), ...params),
+  ];
+}
+
 // "SET a = ?1, b = ?2" plus its values, for a partial UPDATE.
 function setClause(fields) {
   const cols = Object.keys(fields);
   return { sql: cols.map((c, i) => `${c} = ?${i + 1}`).join(", "), values: cols.map((c) => fields[c]), next: cols.length + 1 };
+}
+
+// Insert statements for a new service and its variable links.
+function insertServiceStmts(env, id, projectId, s, varKeys, ts) {
+  return [
+    env.DB.prepare(
+      "INSERT INTO services (id, project_id, kind, provider, name, url, account, region, plan, notes, created_at, updated_at) " +
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)"
+    ).bind(id, projectId, s.kind ?? "", s.provider ?? "", s.name ?? "", s.url ?? "", s.account ?? "", s.region ?? "", s.plan ?? "", s.notes ?? "", ts),
+    ...(varKeys || []).map((k) => env.DB.prepare("INSERT INTO service_vars (service_id, var_key) VALUES (?1, ?2)").bind(id, k)),
+  ];
+}
+
+// undefined when not sent, null to unlink, or a known project id.
+async function parseItemProject(env, value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  const project = await env.DB.prepare("SELECT id FROM projects WHERE id = ?1").bind(String(value)).first();
+  if (!project) throw new HttpError("unknown project id");
+  return project.id;
 }
 
 function isUniqueError(e) {
@@ -132,12 +261,16 @@ async function listVarsWithProjects(env) {
 }
 
 async function listProjects(env) {
-  const [projects, links, services, branches] = await Promise.all([
+  const [projects, links, services, branches, serviceVars] = await Promise.all([
     env.DB.prepare("SELECT * FROM projects ORDER BY name").all(),
     env.DB.prepare("SELECT project_id, var_key FROM project_vars").all(),
     env.DB.prepare("SELECT * FROM services ORDER BY kind, provider").all(),
     env.DB.prepare("SELECT id, project_id, name, notes, updated_at FROM branches ORDER BY name").all(),
+    env.DB.prepare("SELECT service_id, var_key FROM service_vars ORDER BY var_key").all(),
   ]);
+  const keysByService = {};
+  for (const l of serviceVars.results) (keysByService[l.service_id] ||= []).push(l.var_key);
+  for (const svc of services.results) svc.var_keys = keysByService[svc.id] || [];
   const group = (rows, field) => {
     const out = {};
     for (const r of rows) (out[r[field]] ||= []).push(r);
@@ -149,6 +282,7 @@ async function listProjects(env) {
   const branchesByProject = group(branches.results, "project_id");
   return projects.results.map((p) => ({
     ...p,
+    details: parseDetails(p.details),
     keys: (keysByProject[p.id] || []).sort(),
     services: servicesByProject[p.id] || [],
     branches: branchesByProject[p.id] || [],
@@ -226,9 +360,11 @@ async function handleApi(request, env, url) {
     if (projectIds.some((id) => !known.has(id))) return err("unknown project id");
     const encBlob = await encryptValue(env, String(value));
     const ts = now();
-    // One atomic batch: the value and its project links change together or not at all.
+    const old = await env.DB.prepare("SELECT enc_blob FROM vars WHERE key = ?1").bind(key).first();
+    // One atomic batch: the value, its history and its project links change together or not at all.
     // Notes are only touched when sent, so older clients don't wipe them.
     await env.DB.batch([
+      ...(await historyStmts(env, varOwner(key), old?.enc_blob, String(value))),
       env.DB.prepare(
         "INSERT INTO vars (key, enc_blob, updated_at, notes) VALUES (?1, ?2, ?3, coalesce(?4, '')) " +
           "ON CONFLICT(key) DO UPDATE SET enc_blob = ?2, updated_at = ?3, notes = coalesce(?4, notes)"
@@ -261,11 +397,16 @@ async function handleApi(request, env, url) {
   if (varMatch && method === "PATCH") {
     const oldKey = decodeURIComponent(varMatch[1]);
     const body = await readBody(request);
-    const row = await env.DB.prepare("SELECT key FROM vars WHERE key = ?1").bind(oldKey).first();
+    const row = await env.DB.prepare("SELECT key, enc_blob FROM vars WHERE key = ?1").bind(oldKey).first();
     if (!row) return err("no such variable", 404);
     const newKey = body.key === undefined ? oldKey : parseKey(body.key);
     const fields = pickText(body, { notes: NOTES_MAX });
-    if (body.value !== undefined) fields.enc_blob = await encryptValue(env, String(body.value ?? ""));
+    const stmts = [];
+    if (body.value !== undefined) {
+      const value = String(body.value ?? "");
+      stmts.push(...(await historyStmts(env, varOwner(oldKey), row.enc_blob, value)));
+      fields.enc_blob = await encryptValue(env, value);
+    }
     fields.updated_at = now();
 
     let projectIds = null;
@@ -276,7 +417,6 @@ async function handleApi(request, env, url) {
       if (projectIds.some((id) => !known.has(id))) return err("unknown project id");
     }
 
-    const stmts = [];
     if (newKey !== oldKey) {
       if (await env.DB.prepare("SELECT 1 FROM vars WHERE key = ?1").bind(newKey).first()) {
         return err(`${newKey} already exists`, 409);
@@ -295,6 +435,16 @@ async function handleApi(request, env, url) {
           "UPDATE branch_vars SET key = ?2 WHERE key = ?1 AND branch_id IN " +
             "(SELECT b.id FROM branches b JOIN project_vars pv ON pv.project_id = b.project_id WHERE pv.var_key = ?1)"
         ).bind(oldKey, newKey),
+        // History and service links move with it (branch owners are "branch:<36-char id>:KEY").
+        env.DB.prepare(
+          "UPDATE value_history SET owner = 'branch:' || substr(owner, 8, 36) || ':' || ?2 WHERE owner IN " +
+            "(SELECT 'branch:' || b.id || ':' || ?1 FROM branches b JOIN project_vars pv ON pv.project_id = b.project_id WHERE pv.var_key = ?1)"
+        ).bind(oldKey, newKey),
+        env.DB.prepare(
+          "UPDATE service_vars SET var_key = ?2 WHERE var_key = ?1 AND service_id IN " +
+            "(SELECT s.id FROM services s JOIN project_vars pv ON pv.project_id = s.project_id WHERE pv.var_key = ?1)"
+        ).bind(oldKey, newKey),
+        env.DB.prepare("UPDATE value_history SET owner = ?2 WHERE owner = ?1").bind(varOwner(oldKey), varOwner(newKey)),
         env.DB.prepare("UPDATE project_vars SET var_key = ?2 WHERE var_key = ?1").bind(oldKey, newKey),
         env.DB.prepare("DELETE FROM vars WHERE key = ?1").bind(oldKey)
       );
@@ -317,6 +467,7 @@ async function handleApi(request, env, url) {
     const key = decodeURIComponent(varMatch[1]);
     await env.DB.batch([
       env.DB.prepare("DELETE FROM project_vars WHERE var_key = ?1").bind(key),
+      env.DB.prepare("DELETE FROM value_history WHERE owner = ?1").bind(varOwner(key)),
       env.DB.prepare("DELETE FROM vars WHERE key = ?1").bind(key),
     ]);
     return json({ ok: true });
@@ -328,12 +479,12 @@ async function handleApi(request, env, url) {
     return json(await listProjects(env));
   }
 
-  // Accepts the details up front too: notes, repo_url, site_url, and lists of
-  // services ({kind, provider, url, account, notes}) and branches ({name, notes} or "name").
+  // Accepts the details up front too: notes, repo_url, site_url, status, stack, details, and lists of
+  // services ({kind, provider, name, url, account, region, plan, notes}) and branches ({name, notes} or "name").
   if (pathname === "/api/projects" && method === "POST") {
     const body = await readBody(request);
     const name = parseProjectName(body.name);
-    const fields = pickText(body, PROJECT_TEXT);
+    const fields = { ...pickText(body, PROJECT_TEXT), ...pickProjectExtras(body) };
     const services = (Array.isArray(body.services) ? body.services : []).map((s) => parseService(s || {}));
     const branchInput = Array.isArray(body.branches) ? body.branches : [];
     const branches = branchInput.map((b) =>
@@ -346,15 +497,13 @@ async function handleApi(request, env, url) {
     try {
       await env.DB.batch([
         env.DB.prepare(
-          "INSERT INTO projects (id, name, description, notes, repo_url, site_url, created_at, updated_at) " +
-            "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)"
-        ).bind(id, name, fields.description ?? "", fields.notes ?? "", fields.repo_url ?? "", fields.site_url ?? "", ts),
-        ...services.map((s) =>
-          env.DB.prepare(
-            "INSERT INTO services (id, project_id, kind, provider, url, account, notes, created_at, updated_at) " +
-              "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)"
-          ).bind(crypto.randomUUID(), id, s.kind ?? "", s.provider ?? "", s.url ?? "", s.account ?? "", s.notes ?? "", ts)
+          "INSERT INTO projects (id, name, description, notes, repo_url, site_url, status, stack, details, created_at, updated_at) " +
+            "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)"
+        ).bind(
+          id, name, fields.description ?? "", fields.notes ?? "", fields.repo_url ?? "", fields.site_url ?? "",
+          fields.status ?? "", fields.stack ?? "", fields.details ?? "[]", ts
         ),
+        ...services.flatMap((s) => insertServiceStmts(env, crypto.randomUUID(), id, s, [], ts)),
         ...branches.map((b) =>
           env.DB.prepare(
             "INSERT INTO branches (id, project_id, name, notes, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)"
@@ -381,13 +530,11 @@ async function handleApi(request, env, url) {
   const projServicesMatch = pathname.match(/^\/api\/projects\/([^/]+)\/services$/);
   if (projServicesMatch && method === "POST") {
     const project = await findProject(env, decodeURIComponent(projServicesMatch[1]));
-    const s = parseService(await readBody(request));
+    const body = await readBody(request);
+    const s = parseService(body);
+    const varKeys = parseVarKeys(body.var_keys);
     const id = crypto.randomUUID();
-    const ts = now();
-    await env.DB.prepare(
-      "INSERT INTO services (id, project_id, kind, provider, url, account, notes, created_at, updated_at) " +
-        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)"
-    ).bind(id, project.id, s.kind ?? "", s.provider ?? "", s.url ?? "", s.account ?? "", s.notes ?? "", ts).run();
+    await env.DB.batch(insertServiceStmts(env, id, project.id, s, varKeys, now()));
     return json({ ok: true, id });
   }
 
@@ -418,12 +565,12 @@ async function handleApi(request, env, url) {
     return json(full);
   }
 
-  // Partial edit: any of name, description, notes, repo_url, site_url.
+  // Partial edit: any of name, description, notes, repo_url, site_url, status, stack, details.
   // Renaming changes what `envvault run <name>` must be called with.
   if (projMatch && method === "PATCH") {
     const project = await findProject(env, decodeURIComponent(projMatch[1]));
     const body = await readBody(request);
-    const fields = pickText(body, PROJECT_TEXT);
+    const fields = { ...pickText(body, PROJECT_TEXT), ...pickProjectExtras(body) };
     if (body.name !== undefined) fields.name = parseProjectName(body.name);
     fields.updated_at = now();
     const set = setClause(fields);
@@ -442,9 +589,15 @@ async function handleApi(request, env, url) {
     if (!project) return json({ ok: true });
     const id = project.id;
     await env.DB.batch([
+      env.DB.prepare(
+        "DELETE FROM value_history WHERE owner LIKE 'branch:%' AND substr(owner, 8, 36) IN (SELECT id FROM branches WHERE project_id = ?1)"
+      ).bind(id),
       env.DB.prepare("DELETE FROM branch_vars WHERE branch_id IN (SELECT id FROM branches WHERE project_id = ?1)").bind(id),
       env.DB.prepare("DELETE FROM branches WHERE project_id = ?1").bind(id),
+      env.DB.prepare("DELETE FROM service_vars WHERE service_id IN (SELECT id FROM services WHERE project_id = ?1)").bind(id),
       env.DB.prepare("DELETE FROM services WHERE project_id = ?1").bind(id),
+      // Personal items linked to it stay, just unlinked.
+      env.DB.prepare("UPDATE items SET project_id = NULL WHERE project_id = ?1").bind(id),
       env.DB.prepare("DELETE FROM project_vars WHERE project_id = ?1").bind(id),
       env.DB.prepare("DELETE FROM projects WHERE id = ?1").bind(id),
     ]);
@@ -458,16 +611,30 @@ async function handleApi(request, env, url) {
     const id = decodeURIComponent(serviceMatch[1]);
     const row = await env.DB.prepare("SELECT * FROM services WHERE id = ?1").bind(id).first();
     if (!row) return err("no such service", 404);
-    const fields = pickText(await readBody(request), SERVICE_TEXT);
+    const body = await readBody(request);
+    const fields = pickText(body, SERVICE_TEXT);
     if (!(fields.kind ?? row.kind) && !(fields.provider ?? row.provider)) return err("a service needs a kind or a provider");
+    const varKeys = parseVarKeys(body.var_keys);
     fields.updated_at = now();
     const set = setClause(fields);
-    await env.DB.prepare(`UPDATE services SET ${set.sql} WHERE id = ?${set.next}`).bind(...set.values, id).run();
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE services SET ${set.sql} WHERE id = ?${set.next}`).bind(...set.values, id),
+      ...(varKeys
+        ? [
+            env.DB.prepare("DELETE FROM service_vars WHERE service_id = ?1").bind(id),
+            ...varKeys.map((k) => env.DB.prepare("INSERT INTO service_vars (service_id, var_key) VALUES (?1, ?2)").bind(id, k)),
+          ]
+        : []),
+    ]);
     return json({ ok: true, id });
   }
 
   if (serviceMatch && method === "DELETE") {
-    await env.DB.prepare("DELETE FROM services WHERE id = ?1").bind(decodeURIComponent(serviceMatch[1])).run();
+    const id = decodeURIComponent(serviceMatch[1]);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM service_vars WHERE service_id = ?1").bind(id),
+      env.DB.prepare("DELETE FROM services WHERE id = ?1").bind(id),
+    ]);
     return json({ ok: true });
   }
 
@@ -490,14 +657,18 @@ async function handleApi(request, env, url) {
     const body = await readBody(request);
     const key = parseKey(body.key);
     const { notes } = pickText(body, { notes: NOTES_MAX });
-    const exists = await env.DB.prepare("SELECT 1 FROM branch_vars WHERE branch_id = ?1 AND key = ?2").bind(branch.id, key).first();
+    const exists = await env.DB.prepare("SELECT enc_blob FROM branch_vars WHERE branch_id = ?1 AND key = ?2").bind(branch.id, key).first();
     if (!exists && body.value === undefined) return err("value is required for a new branch variable");
-    const encBlob = body.value === undefined ? null : await encryptValue(env, String(body.value ?? ""));
+    const value = body.value === undefined ? null : String(body.value ?? "");
+    const encBlob = value === null ? null : await encryptValue(env, value);
     // An upsert would trip enc_blob's NOT NULL before resolving the conflict, so update and insert are separate.
     const sql = exists
       ? "UPDATE branch_vars SET enc_blob = coalesce(?3, enc_blob), notes = coalesce(?4, notes), updated_at = ?5 WHERE branch_id = ?1 AND key = ?2"
       : "INSERT INTO branch_vars (branch_id, key, enc_blob, notes, updated_at) VALUES (?1, ?2, ?3, coalesce(?4, ''), ?5)";
-    await env.DB.prepare(sql).bind(branch.id, key, encBlob, notes ?? null, now()).run();
+    await env.DB.batch([
+      ...(exists && value !== null ? await historyStmts(env, branchOwner(branch.id, key), exists.enc_blob, value) : []),
+      env.DB.prepare(sql).bind(branch.id, key, encBlob, notes ?? null, now()),
+    ]);
     return json({ ok: true, key });
   }
 
@@ -506,18 +677,29 @@ async function handleApi(request, env, url) {
   if (branchVarMatch && method === "PATCH") {
     const branchId = decodeURIComponent(branchVarMatch[1]);
     const oldKey = decodeURIComponent(branchVarMatch[2]);
-    const row = await env.DB.prepare("SELECT 1 FROM branch_vars WHERE branch_id = ?1 AND key = ?2").bind(branchId, oldKey).first();
+    const row = await env.DB.prepare("SELECT enc_blob FROM branch_vars WHERE branch_id = ?1 AND key = ?2").bind(branchId, oldKey).first();
     if (!row) return err("no such branch variable", 404);
     const body = await readBody(request);
     const fields = pickText(body, { notes: NOTES_MAX });
     if (body.key !== undefined) fields.key = parseKey(body.key);
-    if (body.value !== undefined) fields.enc_blob = await encryptValue(env, String(body.value ?? ""));
+    const stmts = [];
+    if (body.value !== undefined) {
+      const value = String(body.value ?? "");
+      stmts.push(...(await historyStmts(env, branchOwner(branchId, oldKey), row.enc_blob, value)));
+      fields.enc_blob = await encryptValue(env, value);
+    }
     fields.updated_at = now();
     const set = setClause(fields);
+    stmts.push(
+      env.DB.prepare(`UPDATE branch_vars SET ${set.sql} WHERE branch_id = ?${set.next} AND key = ?${set.next + 1}`).bind(...set.values, branchId, oldKey)
+    );
+    if (fields.key && fields.key !== oldKey) {
+      stmts.push(
+        env.DB.prepare("UPDATE value_history SET owner = ?2 WHERE owner = ?1").bind(branchOwner(branchId, oldKey), branchOwner(branchId, fields.key))
+      );
+    }
     try {
-      await env.DB.prepare(`UPDATE branch_vars SET ${set.sql} WHERE branch_id = ?${set.next} AND key = ?${set.next + 1}`)
-        .bind(...set.values, branchId, oldKey)
-        .run();
+      await env.DB.batch(stmts);
     } catch (e) {
       if (isUniqueError(e)) return err(`this branch already has ${fields.key}`, 409);
       throw e;
@@ -526,9 +708,12 @@ async function handleApi(request, env, url) {
   }
 
   if (branchVarMatch && method === "DELETE") {
-    await env.DB.prepare("DELETE FROM branch_vars WHERE branch_id = ?1 AND key = ?2")
-      .bind(decodeURIComponent(branchVarMatch[1]), decodeURIComponent(branchVarMatch[2]))
-      .run();
+    const branchId = decodeURIComponent(branchVarMatch[1]);
+    const key = decodeURIComponent(branchVarMatch[2]);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM value_history WHERE owner = ?1").bind(branchOwner(branchId, key)),
+      env.DB.prepare("DELETE FROM branch_vars WHERE branch_id = ?1 AND key = ?2").bind(branchId, key),
+    ]);
     return json({ ok: true });
   }
 
@@ -557,10 +742,112 @@ async function handleApi(request, env, url) {
   if (branchMatch && method === "DELETE") {
     const id = decodeURIComponent(branchMatch[1]);
     await env.DB.batch([
+      env.DB.prepare("DELETE FROM value_history WHERE owner LIKE 'branch:%' AND substr(owner, 8, 36) = ?1").bind(id),
       env.DB.prepare("DELETE FROM branch_vars WHERE branch_id = ?1").bind(id),
       env.DB.prepare("DELETE FROM branches WHERE id = ?1").bind(id),
     ]);
     return json({ ok: true });
+  }
+
+  // ---- personal items: logins, secure notes, secrets ----
+
+  if (pathname === "/api/items" && method === "GET") {
+    const rows = await env.DB.prepare(
+      "SELECT i.id, i.type, i.title, i.url, i.username, i.notes, i.project_id, p.name AS project, i.created_at, i.updated_at " +
+        "FROM items i LEFT JOIN projects p ON p.id = i.project_id ORDER BY i.title COLLATE NOCASE"
+    ).all();
+    return json(rows.results);
+  }
+
+  // {type: login|note|secret, title, value, url?, username?, notes?, project_id?}
+  if (pathname === "/api/items" && method === "POST") {
+    const body = await readBody(request);
+    const type = String(body.type ?? "");
+    if (!ITEM_TYPES.includes(type)) return err(`type must be one of: ${ITEM_TYPES.join(", ")}`);
+    const fields = pickText(body, ITEM_TEXT);
+    if (!fields.title) return err("title is required");
+    const projectId = await parseItemProject(env, body.project_id);
+    const id = crypto.randomUUID();
+    const ts = now();
+    await env.DB.prepare(
+      "INSERT INTO items (id, type, title, url, username, enc_blob, notes, project_id, created_at, updated_at) " +
+        "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)"
+    ).bind(
+      id, type, fields.title, fields.url ?? "", fields.username ?? "",
+      await encryptValue(env, String(body.value ?? "")), fields.notes ?? "", projectId ?? null, ts
+    ).run();
+    return json({ ok: true, id });
+  }
+
+  const itemValueMatch = pathname.match(/^\/api\/items\/([^/]+)\/value$/);
+  if (itemValueMatch && method === "GET") {
+    const row = await env.DB.prepare("SELECT enc_blob FROM items WHERE id = ?1").bind(decodeURIComponent(itemValueMatch[1])).first();
+    if (!row) return err("no such item", 404);
+    return json({ value: await decryptValue(env, row.enc_blob) }, 200, { "Cache-Control": "no-store" });
+  }
+
+  const itemMatch = pathname.match(/^\/api\/items\/([^/]+)$/);
+  // Partial edit: any of title, url, username, notes, project_id, value.
+  if (itemMatch && method === "PATCH") {
+    const id = decodeURIComponent(itemMatch[1]);
+    const row = await env.DB.prepare("SELECT enc_blob FROM items WHERE id = ?1").bind(id).first();
+    if (!row) return err("no such item", 404);
+    const body = await readBody(request);
+    const fields = pickText(body, ITEM_TEXT);
+    if (fields.title === "") return err("title is required");
+    const projectId = await parseItemProject(env, body.project_id);
+    if (projectId !== undefined) fields.project_id = projectId;
+    const stmts = [];
+    if (body.value !== undefined) {
+      const value = String(body.value ?? "");
+      stmts.push(...(await historyStmts(env, itemOwner(id), row.enc_blob, value)));
+      fields.enc_blob = await encryptValue(env, value);
+    }
+    fields.updated_at = now();
+    const set = setClause(fields);
+    stmts.push(env.DB.prepare(`UPDATE items SET ${set.sql} WHERE id = ?${set.next}`).bind(...set.values, id));
+    await env.DB.batch(stmts);
+    return json({ ok: true, id });
+  }
+
+  if (itemMatch && method === "DELETE") {
+    const id = decodeURIComponent(itemMatch[1]);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM value_history WHERE owner = ?1").bind(itemOwner(id)),
+      env.DB.prepare("DELETE FROM items WHERE id = ?1").bind(id),
+    ]);
+    return json({ ok: true });
+  }
+
+  // ---- value history (the last HISTORY_KEEP replaced values of anything) ----
+
+  // ?owner=var:KEY | branch:BRANCH_ID:KEY | item:ITEM_ID -> [{id, created_at}], newest first, no values.
+  if (pathname === "/api/history" && method === "GET") {
+    const owner = url.searchParams.get("owner");
+    parseOwner(owner);
+    const rows = await env.DB.prepare("SELECT id, created_at FROM value_history WHERE owner = ?1 ORDER BY id DESC").bind(owner).all();
+    return json(rows.results);
+  }
+
+  const historyValueMatch = pathname.match(/^\/api\/history\/(\d+)\/value$/);
+  if (historyValueMatch && method === "GET") {
+    const row = await env.DB.prepare("SELECT enc_blob FROM value_history WHERE id = ?1").bind(Number(historyValueMatch[1])).first();
+    if (!row) return err("no such history entry", 404);
+    return json({ value: await decryptValue(env, row.enc_blob) }, 200, { "Cache-Control": "no-store" });
+  }
+
+  // Puts an old value back. The value it replaces goes into history, like any change.
+  const historyRestoreMatch = pathname.match(/^\/api\/history\/(\d+)\/restore$/);
+  if (historyRestoreMatch && method === "POST") {
+    const id = Number(historyRestoreMatch[1]);
+    const row = await env.DB.prepare("SELECT owner, enc_blob FROM value_history WHERE id = ?1").bind(id).first();
+    if (!row) return err("no such history entry", 404);
+    const plain = await decryptValue(env, row.enc_blob);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM value_history WHERE id = ?1").bind(id),
+      ...(await setValueStmts(env, row.owner, plain)),
+    ]);
+    return json({ ok: true, owner: row.owner });
   }
 
   return err("not found", 404);
