@@ -1,0 +1,17 @@
+{
+  "name": "env-vault-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "assets": "rm -rf dist && mkdir dist && cp cli/*.sh dist/ && if [ -n \"$WEB_DIST\" ]; then cp -r \"$WEB_DIST\"/. dist/; fi",
+    "predev": "[ -d dist ] || npm run assets",
+    "dev": "wrangler dev --port 8787",
+    "pretest": "[ -d dist ] || npm run assets",
+    "test": "node test/smoke.mjs",
+    "db:init": "wrangler d1 execute env-vault-db --local --file=schema.sql",
+    "deploy": "if [ ! -f dist/index.html ]; then echo 'dist/ has no dashboard. Deploy from the env-vault root repo (npm run deploy).' >&2; exit 1; fi && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.141.0"
+  }
+}

@@ -21,6 +21,12 @@ function err(message, status = 400) {
   return json({ error: message }, status);
 }
 
+// Always an object, even for a missing, malformed, or non-object JSON body.
+async function readBody(request) {
+  const body = await request.json().catch(() => null);
+  return body && typeof body === "object" && !Array.isArray(body) ? body : {};
+}
+
 async function requireAuth(request, env) {
   if (!(await isAuthed(request, env))) return err("unauthorized", 401);
   return null;
@@ -52,8 +58,8 @@ async function handleApi(request, env, url) {
   const method = request.method;
 
   if (pathname === "/api/login" && method === "POST") {
-    const body = await request.json().catch(() => ({}));
-    if (!safeEqual(body.password || "", env.DASHBOARD_PASSWORD)) return err("wrong password", 401);
+    const body = await readBody(request);
+    if (!safeEqual(String(body.password ?? ""), env.DASHBOARD_PASSWORD)) return err("wrong password", 401);
     return json({ ok: true }, 200, { "Set-Cookie": await createSessionCookie(env) });
   }
 
@@ -80,29 +86,36 @@ async function handleApi(request, env, url) {
   }
 
   if (pathname === "/api/vars" && method === "POST") {
-    const body = await request.json().catch(() => ({}));
-    const key = (body.key || "").trim();
+    const body = await readBody(request);
+    const key = String(body.key ?? "").trim();
     if (!KEY_RE.test(key)) return err("key must look like AN_ENV_VAR_NAME");
     const value = body.value ?? "";
-    const projectIds = Array.isArray(body.projects) ? body.projects : [];
+    const projectIds = [...new Set(Array.isArray(body.projects) ? body.projects.map(String) : [])];
+    const known = new Set((await env.DB.prepare("SELECT id FROM projects").all()).results.map((p) => p.id));
+    if (projectIds.some((id) => !known.has(id))) return err("unknown project id");
     const encBlob = await encryptValue(env, String(value));
     const now = new Date().toISOString();
-    await env.DB.prepare(
-      "INSERT INTO vars (key, enc_blob, updated_at) VALUES (?1, ?2, ?3) " +
-        "ON CONFLICT(key) DO UPDATE SET enc_blob = ?2, updated_at = ?3"
-    ).bind(key, encBlob, now).run();
-    await env.DB.prepare("DELETE FROM project_vars WHERE var_key = ?1").bind(key).run();
-    for (const pid of projectIds) {
-      await env.DB.prepare("INSERT INTO project_vars (project_id, var_key) VALUES (?1, ?2)").bind(pid, key).run();
-    }
+    // One atomic batch: the value and its project links change together or not at all.
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO vars (key, enc_blob, updated_at) VALUES (?1, ?2, ?3) " +
+          "ON CONFLICT(key) DO UPDATE SET enc_blob = ?2, updated_at = ?3"
+      ).bind(key, encBlob, now),
+      env.DB.prepare("DELETE FROM project_vars WHERE var_key = ?1").bind(key),
+      ...projectIds.map((pid) =>
+        env.DB.prepare("INSERT INTO project_vars (project_id, var_key) VALUES (?1, ?2)").bind(pid, key)
+      ),
+    ]);
     return json({ ok: true, key });
   }
 
   const varMatch = pathname.match(/^\/api\/vars\/([^/]+)$/);
   if (varMatch && method === "DELETE") {
     const key = decodeURIComponent(varMatch[1]);
-    await env.DB.prepare("DELETE FROM project_vars WHERE var_key = ?1").bind(key).run();
-    await env.DB.prepare("DELETE FROM vars WHERE key = ?1").bind(key).run();
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM project_vars WHERE var_key = ?1").bind(key),
+      env.DB.prepare("DELETE FROM vars WHERE key = ?1").bind(key),
+    ]);
     return json({ ok: true });
   }
 
@@ -115,17 +128,18 @@ async function handleApi(request, env, url) {
   }
 
   if (pathname === "/api/projects" && method === "POST") {
-    const body = await request.json().catch(() => ({}));
-    const name = (body.name || "").trim().toLowerCase();
+    const body = await readBody(request);
+    const name = String(body.name ?? "").trim().toLowerCase();
     if (!NAME_RE.test(name)) return err("project name must be lowercase letters, numbers, hyphens");
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     try {
       await env.DB.prepare("INSERT INTO projects (id, name, description, created_at) VALUES (?1, ?2, ?3, ?4)")
-        .bind(id, name, body.description || "", now)
+        .bind(id, name, String(body.description ?? ""), now)
         .run();
     } catch (e) {
-      return err("a project with that name already exists", 409);
+      if (/UNIQUE/i.test(e.message)) return err("a project with that name already exists", 409);
+      throw e;
     }
     return json({ ok: true, id, name });
   }
@@ -133,8 +147,10 @@ async function handleApi(request, env, url) {
   const projMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
   if (projMatch && method === "DELETE") {
     const id = decodeURIComponent(projMatch[1]);
-    await env.DB.prepare("DELETE FROM project_vars WHERE project_id = ?1").bind(id).run();
-    await env.DB.prepare("DELETE FROM projects WHERE id = ?1").bind(id).run();
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM project_vars WHERE project_id = ?1").bind(id),
+      env.DB.prepare("DELETE FROM projects WHERE id = ?1").bind(id),
+    ]);
     return json({ ok: true });
   }
 

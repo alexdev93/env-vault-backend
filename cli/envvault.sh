@@ -55,47 +55,56 @@ cmd_login() {
   echo "saved to $CONFIG_FILE"
 }
 
-cmd_run() {
-  local project="$1"; shift
-  if [ "${1:-}" != "--" ]; then usage; fi
-  shift
-  require_config
-  local json; json="$(fetch_env_json "$project")"
+# Reads the vault's JSON on stdin and prints it as MODE: "exports" (shell export
+# lines), "get KEY" (one value), or "keys" (names). Uses node, else python3.
+# The key is passed as an argument, never spliced into code.
+json_to() {
   if command -v node >/dev/null 2>&1; then
-    eval "$(node -e '
-      const data = JSON.parse(require("fs").readFileSync(0, "utf8"));
-      for (const [k, v] of Object.entries(data)) {
-        process.stdout.write(`export ${k}=${JSON.stringify(String(v))}\n`);
-      }
-    ' <<< "$json")"
+    # shellcheck disable=SC2016  # JS template literal, not shell expansion
+    node -e '
+      const [mode, key] = process.argv.slice(1);
+      const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
+      if (mode === "exports") for (const [k, v] of Object.entries(d)) console.log(`export ${k}=${JSON.stringify(String(v))}`);
+      else if (mode === "get") process.stdout.write(key in d ? String(d[key]) : "");
+      else console.log(Object.keys(d).join("\n"));
+    ' "$@"
   elif command -v python3 >/dev/null 2>&1; then
-    eval "$(python3 -c '
-import json, sys, shlex
-data = json.load(sys.stdin)
-for k, v in data.items():
-    print(f"export {k}={shlex.quote(str(v))}")
-' <<< "$json")"
+    python3 -c '
+import json, shlex, sys
+mode, key = (sys.argv[1:] + [""])[:2]
+d = json.load(sys.stdin)
+if mode == "exports":
+    for k, v in d.items(): print(f"export {k}={shlex.quote(str(v))}")
+elif mode == "get":
+    print(str(d.get(key, "")), end="")
+else:
+    print("\n".join(d.keys()))
+' "$@"
   else
     echo "envvault: needs node or python3 on PATH to parse the response" >&2
     exit 1
   fi
+}
+
+cmd_run() {
+  if [ $# -lt 3 ] || [ "$2" != "--" ]; then usage; fi
+  local project="$1"; shift 2
+  require_config
+  local exports; exports="$(fetch_env_json "$project" | json_to exports)"
+  eval "$exports"
   exec "$@"
 }
 
 cmd_get() {
-  local project="$1" key="$2"
+  [ $# -eq 2 ] || usage
   require_config
-  fetch_env_json "$project" | { command -v node >/dev/null 2>&1 \
-    && node -e "const d=JSON.parse(require('fs').readFileSync(0,'utf8'));process.stdout.write(d['$key']||'')" \
-    || python3 -c "import json,sys;print(json.load(sys.stdin).get('$key',''),end='')"; }
+  fetch_env_json "$1" | json_to get "$2"
 }
 
 cmd_list() {
-  local project="$1"
+  [ $# -eq 1 ] || usage
   require_config
-  fetch_env_json "$project" | { command -v node >/dev/null 2>&1 \
-    && node -e "console.log(Object.keys(JSON.parse(require('fs').readFileSync(0,'utf8'))).join('\n'))" \
-    || python3 -c "import json,sys;print('\n'.join(json.load(sys.stdin).keys()))"; }
+  fetch_env_json "$1" | json_to keys
 }
 
 case "${1:-}" in

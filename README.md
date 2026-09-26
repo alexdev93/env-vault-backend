@@ -1,74 +1,93 @@
-# env-vault backend
+# env-vault-backend
 
-A Cloudflare Worker: a JSON API backed by D1 (SQL), serving the dashboard
-in `public/` as static assets from the same deployment. This is the live,
-web-managed vault — see the main [README](../README.md) for how to use it
-day to day. This file is implementation notes for maintaining it.
+The core of [env-vault](https://env-vault-api.alexdev93.workers.dev): a
+Cloudflare Worker API backed by D1, plus the `envvault` CLI that apps use to
+pull their variables at runtime. The dashboard lives in
+[env-vault-web](https://github.com/alexdev93/env-vault-web). Both are combined
+and deployed from the private `env-vault` repo, where this repo is the
+`backend/` submodule.
 
-## Layout
+```text
+src/index.js     routing + every /api/* handler; other paths go to static assets
+src/crypto.js    AES-256-GCM encrypt/decrypt, session cookies, bearer-token auth
+schema.sql       D1 schema (vars, projects, project_vars), idempotent
+cli/envvault.sh  the CLI, served at /envvault.sh
+cli/install.sh   installer, served at /install.sh
+test/smoke.mjs   end-to-end checks of every route and the CLI
+postman/         API collection + local / production environments
+wrangler.toml    Worker name (env-vault-api), D1 binding, static assets (dist/)
+```
 
-- `src/index.js` — routing + all `/api/*` handlers
-- `src/crypto.js` — AES-256-GCM encrypt/decrypt, session cookie signing, auth checks
-- `schema.sql` — D1 schema (`vars`, `projects`, `project_vars`)
-- `public/index.html` — the dashboard (single file, no build step)
-- `public/envvault.sh` — the CLI users install to pull secrets at runtime
-- `public/install.sh` — one-liner installer for `envvault.sh`
+## Commands
 
-## How auth works
+```bash
+npm install
+npm run db:init   # create tables in the local D1 database
+npm run dev       # http://localhost:8787, local D1 + secrets from .dev.vars
+npm test          # smoke test: real wrangler dev on :8788, throwaway secrets, temp DB
+```
 
-Two independent ways in, both checked on every `/api/*` request except
-`/api/login`:
+`npm run assets` builds `dist/` from `cli/*.sh`, plus the dashboard if
+`WEB_DIST` points at a web build. `npm run deploy` refuses to run without the
+dashboard in `dist/`, so a deploy from this repo alone can't wipe the live
+site. Deploy from the root repo instead.
 
-- **Session cookie** — `POST /api/login` with the `DASHBOARD_PASSWORD`
-  secret sets an HttpOnly, Secure, signed cookie (`ev_session=<expiry>.<hmac>`,
-  verified with `SESSION_SECRET`, no server-side session table — it's
-  stateless, just a signed expiry). This is what the browser dashboard uses.
-- **Bearer token** — `Authorization: Bearer <API_TOKEN>`. This is what
-  `envvault` (CLI/containers/CI) uses. Same token for everything since
-  this is single-user; there's no per-project token scoping.
+Local secrets go in `.dev.vars` (git-ignored). Use throwaway values:
 
-## Secrets (set via `wrangler secret put`, never in git)
+```bash
+cat > .dev.vars <<EOV
+ENCRYPTION_KEY="$(openssl rand -base64 32)"
+SESSION_SECRET="$(openssl rand -hex 32)"
+API_TOKEN="dev-token-$(openssl rand -hex 16)"
+DASHBOARD_PASSWORD="dev-password"
+EOV
+```
+
+## Using the CLI
+
+```bash
+curl -fsS https://env-vault-api.alexdev93.workers.dev/install.sh | sh
+envvault login                       # saves URL + API token to ~/.config/env-vault/config (mode 600)
+envvault run my-api -- npm start     # runs the command with my-api's variables injected
+envvault get my-api DATABASE_URL     # print one value
+envvault list my-api                 # list variable names
+```
+
+In CI or containers, set `ENV_VAULT_TOKEN` (and optionally `ENV_VAULT_URL`)
+as environment variables instead of running `envvault login`. The CLI calls
+`GET /api/projects/<name>/env` with the bearer token and `exec`s your command
+with the values exported. Nothing is written to disk.
+
+## Secrets (set with `wrangler secret put`, never in git)
 
 | Secret | Purpose |
 | --- | --- |
-| `ENCRYPTION_KEY` | 32 random bytes, base64 — AES-256-GCM key for values at rest in D1 |
+| `ENCRYPTION_KEY` | 32 random bytes, base64: the AES-256-GCM key for values at rest in D1 |
 | `SESSION_SECRET` | HMAC key for signing the dashboard session cookie |
 | `API_TOKEN` | The bearer token `envvault` uses |
 | `DASHBOARD_PASSWORD` | The web login password |
 
-To rotate any of them: `printf '%s' "$NEWVALUE" | wrangler secret put NAME`
-(run from `backend/`). Rotating `DASHBOARD_PASSWORD` or `API_TOKEN` takes
-effect immediately; rotating `ENCRYPTION_KEY` does **not** re-encrypt
-existing rows — do that manually (decrypt-all under the old key, re-encrypt
-under the new one, in one script) before rotating, or values become
-unreadable.
-
-## Manual deploy
-
-Normally CI does this (`.github/workflows/deploy-backend.yml` on any push
-touching `backend/**`). To do it by hand:
-
-```bash
-cd backend
-CLOUDFLARE_API_TOKEN=<token with Workers Scripts:Edit, D1:Edit> wrangler deploy
-```
+To rotate a secret, run `printf '%s' "$NEWVALUE" | npx wrangler secret put NAME`.
+- Rotating `DASHBOARD_PASSWORD` or `API_TOKEN` takes effect immediately.
+- Rotating `ENCRYPTION_KEY` does **not** re-encrypt existing rows. Decrypt
+  everything under the old key and re-encrypt under the new one first, or the
+  stored values become unreadable.
 
 ## Database
 
 ```bash
-cd backend
-wrangler d1 execute env-vault-db --remote --command "SELECT * FROM projects"
+npx wrangler d1 execute env-vault-db --remote --command "SELECT key, updated_at FROM vars"
 ```
 
-Schema changes: edit `schema.sql`, then
-`wrangler d1 execute env-vault-db --remote --file=schema.sql` (writes are
-idempotent — every statement is `CREATE TABLE IF NOT EXISTS` / `CREATE
-INDEX IF NOT EXISTS`, safe to re-run).
+For schema changes, edit `schema.sql`, then run
+`npx wrangler d1 execute env-vault-db --remote --file=schema.sql`. It's safe
+to re-run.
 
 ## Adding an API endpoint
 
-Everything routes through the single `handleApi` function in
-`src/index.js` — no framework, just pathname/method matching. Add a new
-`if (pathname === ... && method === ...)` block; auth is already enforced
-above that point for everything except `/api/login`, `/api/logout`, and
-`/api/whoami`.
+Everything routes through `handleApi` in `src/index.js`. Add an
+`if (pathname === … && method === …)` block after the auth check. Auth is
+enforced there for everything except `/api/login` and `/api/logout`. Use
+`readBody()` for JSON input and `env.DB.batch()` when a change spans several
+statements. Add a check to `test/smoke.mjs`, and if the dashboard needs the
+endpoint, a wrapper in env-vault-web's `src/api.ts`.

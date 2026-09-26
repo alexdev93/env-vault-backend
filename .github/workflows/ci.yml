@@ -1,0 +1,29 @@
+name: CI
+
+# Lint the CLI and smoke-test the Worker (real `wrangler dev`, throwaway secrets,
+# temporary database). This repo never deploys: production is deployed only from
+# the env-vault root repo, which combines this backend with the web dashboard.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Lint CLI scripts
+        run: shellcheck cli/*.sh
+      - run: npm ci
+      - run: npm test

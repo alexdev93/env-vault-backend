@@ -1,0 +1,8 @@
+# Local-only secrets for `wrangler dev` -- never commit
+.dev.vars
+.dev.vars.*
+
+# Wrangler local state (local D1 lives here), build output, deps
+.wrangler/
+dist/
+node_modules/

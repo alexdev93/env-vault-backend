@@ -8,6 +8,9 @@ binding = "DB"
 database_name = "env-vault-db"
 database_id = "d7eef25d-d368-4f84-94bd-bb02aff03a4e"
 
+# Static files served for every non-/api path. `npm run assets` builds dist/
+# from cli/*.sh plus the dashboard build (WEB_DIST), which the env-vault root
+# repo supplies from its web/ submodule.
 [assets]
-directory = "./public"
+directory = "./dist"
 binding = "ASSETS"

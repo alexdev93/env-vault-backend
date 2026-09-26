@@ -1,0 +1,77 @@
+{
+  "info": {
+    "name": "env-vault API",
+    "description": "env-vault Worker API. Authenticated requests use the collection-level Bearer token ({{apiToken}}); the dashboard itself uses the session cookie from Login instead.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{apiToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Dashboard (root)",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "url": "{{baseUrl}}/"
+      }
+    },
+    {
+      "name": "Login",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"password\": \"{{dashboardPassword}}\" }"
+        },
+        "url": "{{baseUrl}}/api/login"
+      }
+    },
+    {
+      "name": "Who am I",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/whoami"
+      }
+    },
+    {
+      "name": "List variables",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/vars"
+      }
+    },
+    {
+      "name": "List projects",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/projects"
+      }
+    },
+    {
+      "name": "Project env (what envvault calls)",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/projects/{{project}}/env"
+      }
+    }
+  ]
+}
