@@ -10,6 +10,7 @@ and deployed from the private `env-vault` repo, where this repo is the
 ```text
 src/index.js     routing + every /api/* handler; other paths go to static assets
 src/crypto.js    AES-256-GCM encrypt/decrypt, session cookies, bearer-token auth
+src/activity.js  access log (who pulled/read/changed what, from where) + its reports
 migrations/      D1 schema as numbered migrations (wrangler d1 migrations)
 cli/envvault.sh  the CLI, served at /envvault.sh
 cli/install.sh   installer, served at /install.sh
@@ -54,6 +55,14 @@ envvault list my-api                 # list variable names
 envvault info my-api                 # details: notes, URLs, services, branches
 envvault run my-api -b main -- node server.js   # main's overrides on top of the defaults
 ```
+
+**Name each server** so the dashboard's Activity page can tell them apart:
+set `ENV_VAULT_CLIENT` (e.g. `ENV_VAULT_CLIENT=cheat-sheet-prod envvault run
+cheat-sheet -- node server.js`), or give a name at `envvault login`. Without
+one, the machine's hostname is used. The CLI also sends which command ran and,
+in CI or on a hosting platform (GitHub Actions, GitLab, Vercel, Netlify,
+Cloudflare Pages, Render, Fly, Railway, Kubernetes, Docker), where it runs.
+Nothing secret is sent.
 
 `-b BRANCH` (or `--branch BRANCH`) works with `run`, `get` and `list`.
 Without it you get the project's default variables, as before. With it,
@@ -103,6 +112,12 @@ To rotate a secret, run `printf '%s' "$NEWVALUE" | npx wrangler secret put NAME`
   project's defaults.
 - **items**: the personal vault: logins (`url`, `username`, password),
   secure notes and secrets, optionally linked to a project.
+- **access_log**: who pulled which project, read a secret, changed
+  something, signed in or presented a bad token: time, project, branch,
+  target, the caller's name/host/CI (from the CLI), IP, country, network
+  (ASN), user agent, status. Written after the response (`ctx.waitUntil`,
+  `src/activity.js`), kept 90 days, never contains a value. The dashboard's
+  own browsing (listing names) isn't logged, nor are credential-less 401s.
 - **value_history**: the last 5 replaced values (encrypted) of every
   variable, branch value and item. Saving an unchanged value adds nothing;
   renames carry the history along; deleting something deletes its history.
@@ -165,6 +180,8 @@ routes change only the fields you send.
 | `GET /api/history?owner=O` | `[{id, created_at}]`, newest first; `O` is `var:KEY`, `branch:ID:KEY` or `item:ID` |
 | `GET /api/history/:id/value` | one earlier value, decrypted |
 | `POST /api/history/:id/restore` | put it back; the value it replaces goes into history |
+| `GET /api/activity/summary?days=30&project=` | totals, pulls per day, heartbeat per project (last pull, by whom, sparkline data), clients and what they pull |
+| `GET /api/activity?project=&kind=&client=&before=&limit=` | the access log, newest first; `kind` is a comma list (`env_pull`, `value_read`, `token_read`, `write`, `login`, `login_failed`, `auth_failed`, `api_read`); page with `before=<next>` |
 
 ## Adding an API endpoint
 

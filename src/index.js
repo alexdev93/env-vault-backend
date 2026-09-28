@@ -6,6 +6,7 @@ import {
   clearSessionCookie,
   isAuthed,
 } from "./crypto.js";
+import { activityEvents, activitySummary, recordAccess } from "./activity.js";
 
 const KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -819,6 +820,16 @@ async function handleApi(request, env, url) {
     return json({ ok: true });
   }
 
+  // ---- access log: who pulled or read what, from where (see activity.js) ----
+
+  if (pathname === "/api/activity/summary" && method === "GET") {
+    return json(await activitySummary(env, url), 200, { "Cache-Control": "no-store" });
+  }
+
+  if (pathname === "/api/activity" && method === "GET") {
+    return json(await activityEvents(env, url), 200, { "Cache-Control": "no-store" });
+  }
+
   // ---- value history (the last HISTORY_KEEP replaced values of anything) ----
 
   // ?owner=var:KEY | branch:BRANCH_ID:KEY | item:ITEM_ID -> [{id, created_at}], newest first, no values.
@@ -853,16 +864,23 @@ async function handleApi(request, env, url) {
   return err("not found", 404);
 }
 
+async function apiResponse(request, env, url) {
+  try {
+    return await handleApi(request, env, url);
+  } catch (e) {
+    if (e instanceof HttpError) return err(e.message, e.status);
+    return err(`internal error: ${e.message}`, 500);
+  }
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {
-      try {
-        return await handleApi(request, env, url);
-      } catch (e) {
-        if (e instanceof HttpError) return err(e.message, e.status);
-        return err(`internal error: ${e.message}`, 500);
-      }
+      const response = await apiResponse(request, env, url);
+      // Recorded after the response is sent, so logging never slows a request down.
+      ctx.waitUntil(recordAccess(env, request, url, response));
+      return response;
     }
     return env.ASSETS.fetch(request);
   },

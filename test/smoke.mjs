@@ -286,6 +286,53 @@ try {
     (await getJson("/api/items")).length === 0 && (await hist(`item:${loginItem.id}`)).length === 0);
   await send("DELETE", "/api/vars/SMOKE_DATABASE");
 
+  // access log + activity report
+  const actSecret = "act-secret-value-123";
+  const act = await (await send("POST", "/api/projects", { name: "smoke-act", branches: ["main"] })).json();
+  await send("POST", "/api/vars", { key: "ACT_KEY", value: actSecret, projects: [act.id] });
+  const pullAs = spawnSync("bash", ["cli/envvault.sh", "run", "smoke-act", "-b", "main", "--", "true"], {
+    encoding: "utf8",
+    env: {
+      ...process.env, ENV_VAULT_URL: BASE, ENV_VAULT_TOKEN: SECRETS.API_TOKEN, ENV_VAULT_CLIENT: "cheat-sheet-prod",
+      GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "me/cheat-sheet", GITHUB_REF_NAME: "main", GITHUB_RUN_ID: "42",
+    },
+  });
+  check("envvault run as a named CI client succeeds", pullAs.status === 0, pullAs.stderr);
+  await fetch(BASE + "/api/vars/ACT_KEY/value", withCookie());
+  await fetch(BASE + "/api/projects/smoke-act/env", { headers: { Authorization: "Bearer wrong" } });
+  const actEvents = async (q = "") => (await getJson(`/api/activity?project=smoke-act${q}`)).events;
+  // Logging happens after the response (ctx.waitUntil): give it a moment.
+  let evs = [];
+  for (let i = 0; i < 40 && evs.filter((e) => ["env_pull", "value_read"].includes(e.kind)).length < 1; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    evs = await actEvents();
+  }
+  const pull = evs.find((e) => e.kind === "env_pull" && e.status === 200);
+  check("an env pull is logged with who, where and what",
+    pull?.client === "cheat-sheet-prod" && pull.branch === "main" && pull.command === "run" && pull.auth === "bearer" &&
+      pull.vars_count === 1 && /^github-actions me\/cheat-sheet@main run 42/.test(pull.ci) && /^envvault-cli\//.test(pull.user_agent),
+    JSON.stringify(pull));
+  const allEvents = (await getJson("/api/activity?limit=200")).events;
+  check("a dashboard reveal is logged as a value read",
+    allEvents.some((e) => e.kind === "value_read" && e.target === "ACT_KEY" && e.auth === "session"));
+  check("a wrong token is logged as a failed auth", allEvents.some((e) => e.kind === "auth_failed" && e.path === "/api/projects/smoke-act/env"));
+  check("a credential-less 401 (the dashboard's whoami probe) is not logged",
+    !allEvents.some((e) => e.kind === "auth_failed" && e.path === "/api/whoami"));
+  check("browsing lists in the dashboard is not logged", !allEvents.some((e) => e.method === "GET" && e.path === "/api/vars"));
+  check("the log never contains a secret value", !JSON.stringify(allEvents).includes(actSecret) && !JSON.stringify(allEvents).includes(SECRETS.API_TOKEN));
+  check("GET /api/activity?kind= filters", (await actEvents("&kind=env_pull")).every((e) => e.kind === "env_pull"));
+  const summary = await getJson("/api/activity/summary?days=7");
+  const actProj = summary.projects?.find((p) => p.project === "smoke-act");
+  check("summary: per-project heartbeat", actProj?.pulls >= 1 && actProj.last_client === "cheat-sheet-prod" && actProj.daily.length >= 1,
+    JSON.stringify(actProj));
+  check("summary: clients and what they pull",
+    summary.clients?.some((c) => c.client === "cheat-sheet-prod" && c.projects.includes("smoke-act")), JSON.stringify(summary.clients));
+  check("summary: totals and daily pulls", summary.totals?.pulls >= 1 && summary.totals.failures >= 1 && summary.daily?.length >= 1, JSON.stringify(summary.totals));
+  check("summary: ?project= scopes it", (await getJson("/api/activity/summary?project=nope")).totals.pulls === 0);
+  check("GET /api/activity without auth → 401", (await fetch(BASE + "/api/activity")).status === 401);
+  await send("DELETE", "/api/projects/smoke-act");
+  await send("DELETE", "/api/vars/ACT_KEY");
+
   // cleanup routes
   check("DELETE /api/vars/:key → 200", (await fetch(BASE + "/api/vars/SMOKE_URL", withCookie({ method: "DELETE" }))).status === 200);
   check("DELETE /api/projects/:id → 200", (await fetch(BASE + `/api/projects/${proj.id}`, withCookie({ method: "DELETE" }))).status === 200);

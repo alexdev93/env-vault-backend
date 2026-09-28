@@ -387,6 +387,22 @@
         "method": "DELETE",
         "url": "{{baseUrl}}/api/items/{{itemId}}"
       }
+    },
+    {
+      "name": "Activity summary",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/activity/summary?days=30&project=",
+        "description": "Totals, pulls per day, per-project heartbeat, clients."
+      }
+    },
+    {
+      "name": "Activity events",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/activity?project={{project}}&kind=env_pull,auth_failed&limit=50",
+        "description": "Access log, newest first. Page with before=<next>."
+      }
     }
   ]
 }

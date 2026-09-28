@@ -6,6 +6,8 @@ set -euo pipefail
 CONFIG_DIR="$HOME/.config/env-vault"
 CONFIG_FILE="$CONFIG_DIR/config"
 DEFAULT_URL="https://env-vault-api.alexdev93.workers.dev"
+CLI_VERSION="3"
+COMMAND=""
 
 usage() {
   cat >&2 <<'EOF'
@@ -18,6 +20,10 @@ Usage:
 
 Without -b you get the project's default variables. With -b BRANCH, that
 branch's overrides are layered on top (the branch must exist in the vault).
+
+The vault's Activity page shows who pulled what. Name each server or CI job
+with ENV_VAULT_CLIENT (e.g. ENV_VAULT_CLIENT=cheat-sheet-prod); otherwise the
+name saved by `envvault login`, or else the machine's hostname, is used.
 EOF
   exit 1
 }
@@ -40,10 +46,51 @@ require_config() {
   : "${ENV_VAULT_TOKEN:?missing ENV_VAULT_TOKEN in $CONFIG_FILE}"
 }
 
+# One line, at most 200 characters: safe to send as an HTTP header value.
+oneline() {
+  printf '%s' "$1" | tr -d '\r\n' | cut -c1-200
+}
+
+# Where this runs, when it's CI or a hosting platform (read from their standard env vars).
+ci_info() {
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    printf 'github-actions %s@%s run %s' "${GITHUB_REPOSITORY:-}" "${GITHUB_REF_NAME:-}" "${GITHUB_RUN_ID:-}"
+  elif [ -n "${GITLAB_CI:-}" ]; then
+    printf 'gitlab %s@%s job %s' "${CI_PROJECT_PATH:-}" "${CI_COMMIT_REF_NAME:-}" "${CI_JOB_ID:-}"
+  elif [ -n "${VERCEL:-}" ]; then
+    printf 'vercel %s@%s %s' "${VERCEL_GIT_REPO_SLUG:-}" "${VERCEL_GIT_COMMIT_REF:-}" "${VERCEL_ENV:-}"
+  elif [ -n "${CF_PAGES:-}" ]; then
+    printf 'cloudflare-pages %s' "${CF_PAGES_BRANCH:-}"
+  elif [ -n "${NETLIFY:-}" ]; then
+    printf 'netlify %s@%s' "${SITE_NAME:-}" "${BRANCH:-}"
+  elif [ -n "${RENDER:-}" ]; then
+    printf 'render %s' "${RENDER_SERVICE_NAME:-}"
+  elif [ -n "${FLY_APP_NAME:-}" ]; then
+    printf 'fly %s %s' "$FLY_APP_NAME" "${FLY_REGION:-}"
+  elif [ -n "${RAILWAY_SERVICE_NAME:-}" ]; then
+    printf 'railway %s %s' "$RAILWAY_SERVICE_NAME" "${RAILWAY_ENVIRONMENT_NAME:-}"
+  elif [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
+    printf 'kubernetes'
+  elif [ -f /.dockerenv ]; then
+    printf 'docker'
+  elif [ -n "${CI:-}" ]; then
+    printf 'ci'
+  fi
+}
+
 # GET an API path; on an HTTP error, print the server's message and exit.
+# It tells the vault who is asking (never anything secret) for the Activity page.
 api_get() {
-  local body status
-  body="$(curl -sS -w '\n%{http_code}' "$ENV_VAULT_URL$1" -H "Authorization: Bearer $ENV_VAULT_TOKEN")" || exit 1
+  local body status host client
+  host="${HOSTNAME:-$(uname -n 2>/dev/null || echo unknown)}"
+  client="${ENV_VAULT_CLIENT:-${ENV_VAULT_CLIENT_NAME:-$host}}"
+  body="$(curl -sS -w '\n%{http_code}' "$ENV_VAULT_URL$1" \
+    -H "Authorization: Bearer $ENV_VAULT_TOKEN" \
+    -H "User-Agent: envvault-cli/$CLI_VERSION ($(uname -s 2>/dev/null || echo unknown))" \
+    -H "X-EnvVault-Client: $(oneline "$client")" \
+    -H "X-EnvVault-Host: $(oneline "$host")" \
+    -H "X-EnvVault-CI: $(oneline "$(ci_info)")" \
+    -H "X-EnvVault-Command: $COMMAND")" || exit 1
   status="${body##*$'\n'}"
   body="${body%$'\n'*}"
   if [ "${status:0:1}" != "2" ]; then
@@ -86,10 +133,14 @@ cmd_login() {
   url="${url:-$DEFAULT_URL}"
   read -r -s -p "API token: " token
   echo
+  local host="${HOSTNAME:-$(uname -n 2>/dev/null || echo unknown)}"
+  read -r -p "Name this machine for the vault's Activity page [$host]: " name
+  name="$(printf '%s' "${name:-$host}" | tr -cd 'A-Za-z0-9._ -')"
   mkdir -p "$CONFIG_DIR"
   {
     echo "ENV_VAULT_URL='${url}'"
     echo "ENV_VAULT_TOKEN='${token}'"
+    echo "ENV_VAULT_CLIENT_NAME='${name}'"
   } > "$CONFIG_FILE"
   chmod 600 "$CONFIG_FILE"
   echo "saved to $CONFIG_FILE"
@@ -198,6 +249,7 @@ cmd_info() {
   printf '%s' "$json" | json_to info
 }
 
+COMMAND="${1:-}"
 case "${1:-}" in
   login) cmd_login ;;
   run) shift; cmd_run "$@" ;;
