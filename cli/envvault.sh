@@ -146,16 +146,23 @@ cmd_login() {
   echo "saved to $CONFIG_FILE"
 }
 
-# Reads the vault's JSON on stdin and prints it as MODE: "exports" (shell export
-# lines), "get KEY" (one value), or "keys" (names). Uses node, else python3.
-# The key is passed as an argument, never spliced into code.
+# Reads the vault's JSON on stdin and prints it as MODE: "env0" (KEY NUL VALUE NUL
+# pairs, for cmd_run to export as data), "get KEY" (one value), "keys" (names) or
+# "info". Uses node, else python3. The key is passed as an argument, never spliced
+# into code, and no mode ever produces shell code.
 json_to() {
   if command -v node >/dev/null 2>&1; then
     # shellcheck disable=SC2016  # JS template literal, not shell expansion
     node -e '
       const [mode, key] = process.argv.slice(1);
       const d = JSON.parse(require("fs").readFileSync(0, "utf8"));
-      if (mode === "exports") for (const [k, v] of Object.entries(d)) console.log(`export ${k}=${JSON.stringify(String(v))}`);
+      if (mode === "env0") {
+        for (const [k, v] of Object.entries(d)) {
+          // An environment variable cannot hold a NUL byte, and it would break the pairing.
+          if (String(v).includes("\0")) { process.stderr.write(`envvault: ${k} contains a NUL byte and cannot be exported\n`); process.exit(1); }
+          process.stdout.write(k + "\0" + String(v) + "\0");
+        }
+      }
       else if (mode === "get") process.stdout.write(key in d ? String(d[key]) : "");
       else if (mode === "info") {
         const line = (label, v) => v && console.log(`${label.padEnd(14)}${v}`);
@@ -181,11 +188,14 @@ json_to() {
     ' "$@"
   elif command -v python3 >/dev/null 2>&1; then
     python3 -c '
-import json, shlex, sys
+import json, sys
 mode, key = (sys.argv[1:] + [""])[:2]
 d = json.load(sys.stdin)
-if mode == "exports":
-    for k, v in d.items(): print(f"export {k}={shlex.quote(str(v))}")
+if mode == "env0":
+    for k, v in d.items():
+        if "\0" in str(v):
+            sys.stderr.write("envvault: " + k + " contains a NUL byte and cannot be exported\n"); sys.exit(1)
+        sys.stdout.write(k + "\0" + str(v) + "\0")
 elif mode == "get":
     print(str(d.get(key, "")), end="")
 elif mode == "info":
@@ -219,10 +229,20 @@ cmd_run() {
   parse_args "$@"
   if [ "${#ARGS[@]}" -ne 1 ] || [ "$HAS_DASHDASH" -ne 1 ] || [ "${#REST[@]}" -eq 0 ]; then usage; fi
   require_config
-  local json exports
+  local json key value
   json="$(fetch_env_json "${ARGS[0]}" "$BRANCH")"
-  exports="$(printf '%s' "$json" | json_to exports)"
-  eval "$exports"
+  # Parse once up front so a problem (bad JSON, no node/python, a NUL byte) stops
+  # here instead of starting the app without its variables.
+  printf '%s' "$json" | json_to env0 >/dev/null
+  # Each value is exported as data, never evaluated as shell code: $, backticks,
+  # $(...), quotes, backslashes and newlines all reach the app unchanged.
+  while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      echo "envvault: skipping invalid variable name: $key" >&2
+      continue
+    fi
+    export "$key=$value"
+  done < <(printf '%s' "$json" | json_to env0)
   exec "${REST[@]}"
 }
 

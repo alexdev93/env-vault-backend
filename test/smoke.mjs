@@ -114,6 +114,17 @@ try {
   check("envvault list prints key names", cli("list", "smoke-app").stdout.trim() === "SMOKE_URL");
   check("envvault run with missing args prints usage", /Usage:/.test(cli("run", "smoke-app").stderr));
 
+  // Values are exported as data, never run through the shell: $, backticks, $(...),
+  // quotes, backslashes and newlines must arrive unchanged, and nothing may execute.
+  const marker = join(state, "pwned");
+  const hostile = `pa$word$1\${HOME} \`touch ${marker}\` $(touch ${marker}) it's "q" a\\b\\n\nline2  `;
+  await fetch(BASE + "/api/vars", withCookie(json({ key: "SMOKE_HOSTILE", value: hostile, projects: [proj.id] })));
+  const hostileRun = cli("run", "smoke-app", "--", "node", "-e", "process.stdout.write(process.env.SMOKE_HOSTILE)");
+  check("envvault run passes $, backticks, $(), quotes and newlines through unchanged", hostileRun.status === 0 && hostileRun.stdout === hostile,
+    JSON.stringify({ got: hostileRun.stdout, err: hostileRun.stderr }));
+  check("… and never executes anything inside a value", !existsSync(marker));
+  await fetch(BASE + "/api/vars/SMOKE_HOSTILE", withCookie({ method: "DELETE" }));
+
   // notes, project details, services, branches
   const send = (method, path, body) =>
     fetch(BASE + path, withCookie({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }));
