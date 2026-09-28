@@ -56,6 +56,34 @@ envvault info my-api                 # details: notes, URLs, services, branches
 envvault run my-api -b main -- node server.js   # main's overrides on top of the defaults
 ```
 
+### Platforms
+
+`envvault` is a bash script and needs `curl` plus `node` or `python3`.
+
+| Where | Status |
+| --- | --- |
+| Linux, WSL, Docker/CI images | Works. Alpine: `apk add bash curl` (+ `nodejs` or `python3`). |
+| macOS | Works with the built-in bash 3.2. The installer's PATH hint is for `~/.zshrc`. |
+| Windows, Git Bash | Works. npm runs `package.json` scripts with cmd.exe, so for `"dev": "envvault run …"` run once: `npm config set script-shell "C:\Program Files\Git\bin\bash.exe"` |
+| Windows, PowerShell / cmd | No bash: use Git Bash or WSL, or the PowerShell snippet below. |
+
+`npm run test:platforms` (Docker) runs the real CLI in macOS's bash 3.2, a
+python3-only Alpine and a node-only Node image against hostile values; the
+backend CI runs it on every push.
+
+PowerShell, without bash (values are set as data, never evaluated):
+
+```powershell
+$vars = Invoke-RestMethod "$env:ENV_VAULT_URL/api/projects/my-api/env?branch=main" -Headers @{ Authorization = "Bearer $env:ENV_VAULT_TOKEN" }
+$vars.PSObject.Properties | ForEach-Object { [Environment]::SetEnvironmentVariable($_.Name, [string]$_.Value, "Process") }
+npm run dev   # anything started from this session gets the variables
+```
+
+**Naming a machine is optional.** Nothing requires it: without a name, a
+caller shows up on the Activity page under its hostname (or, for plain API
+calls, its IP). To name one, set `ENV_VAULT_CLIENT` or answer the optional
+question in `envvault login`.
+
 **Name each server** so the dashboard's Activity page can tell them apart:
 set `ENV_VAULT_CLIENT` (e.g. `ENV_VAULT_CLIENT=cheat-sheet-prod envvault run
 cheat-sheet -- node server.js`), or give a name at `envvault login`. Without

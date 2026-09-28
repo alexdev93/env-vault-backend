@@ -1,0 +1,4 @@
+#!/bin/sh
+# Fake curl: records the headers envvault sends, returns a canned response.
+for a in "$@"; do printf '%s\n' "$a"; done > /t/curl_args
+cat "${FAKE_JSON:-/t/hostile.json}"; printf '\n200'

@@ -27,3 +27,13 @@ jobs:
         run: shellcheck cli/*.sh
       - run: npm ci
       - run: npm test
+
+  # The CLI runs on servers, CI runners and laptops we don't control: run it in
+  # macOS's bash 3.2, a python3-only Alpine, and a node-only Node image.
+  platforms:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: CLI on bash 3.2 / python-only / node-only
+        run: bash test/platforms.sh

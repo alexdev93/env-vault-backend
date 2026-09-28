@@ -1,0 +1,3 @@
+*.sh text eol=lf
+cli/* text eol=lf
+test/platforms/fakebin/* text eol=lf

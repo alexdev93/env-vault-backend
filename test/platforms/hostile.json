@@ -1,0 +1,1 @@
+{"DOLLAR":"pa$word$1${HOME}","BACKTICK":"a`touch /t/pwned`b","SUBST":"$(touch /t/pwned)","QUOTES":"it's \"q\"","BACKSLASH":"a\\b\\n","NEWLINE":"line1\nline2","SPACES":"  lead and trail  ","UNICODE":"ünïcode ✓","EMPTY":""}

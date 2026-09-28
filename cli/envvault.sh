@@ -129,18 +129,21 @@ parse_args() {
 }
 
 cmd_login() {
-  read -r -p "env-vault URL [$DEFAULT_URL]: " url
+  local url="" token="" name=""
+  # Every prompt tolerates end-of-input, so scripted logins that pipe in only
+  # the URL and token (written before the name prompt existed) still work.
+  read -r -p "env-vault URL [$DEFAULT_URL]: " url || true
   url="${url:-$DEFAULT_URL}"
-  read -r -s -p "API token: " token
+  read -r -s -p "API token: " token || true
   echo
-  local host="${HOSTNAME:-$(uname -n 2>/dev/null || echo unknown)}"
-  read -r -p "Name this machine for the vault's Activity page [$host]: " name
-  name="$(printf '%s' "${name:-$host}" | tr -cd 'A-Za-z0-9._ -')"
+  # Optional: leave it empty to be identified by this machine's hostname.
+  read -r -p "Name this machine for the vault's Activity page (optional, Enter for the hostname): " name || true
+  name="$(printf '%s' "$name" | tr -cd 'A-Za-z0-9._ -')"
   mkdir -p "$CONFIG_DIR"
   {
     echo "ENV_VAULT_URL='${url}'"
     echo "ENV_VAULT_TOKEN='${token}'"
-    echo "ENV_VAULT_CLIENT_NAME='${name}'"
+    if [ -n "$name" ]; then echo "ENV_VAULT_CLIENT_NAME='${name}'"; fi
   } > "$CONFIG_FILE"
   chmod 600 "$CONFIG_FILE"
   echo "saved to $CONFIG_FILE"
@@ -190,14 +193,21 @@ json_to() {
     python3 -c '
 import json, sys
 mode, key = (sys.argv[1:] + [""])[:2]
-d = json.load(sys.stdin)
+# Bytes in, bytes out, always UTF-8: on Windows (Git Bash) text-mode stdio would
+# turn "\n" into "\r\n" inside values and use the ANSI code page.
+d = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except AttributeError:
+    pass
+raw = sys.stdout.buffer
 if mode == "env0":
     for k, v in d.items():
         if "\0" in str(v):
             sys.stderr.write("envvault: " + k + " contains a NUL byte and cannot be exported\n"); sys.exit(1)
-        sys.stdout.write(k + "\0" + str(v) + "\0")
+        raw.write((k + "\0" + str(v) + "\0").encode("utf-8"))
 elif mode == "get":
-    print(str(d.get(key, "")), end="")
+    raw.write(str(d.get(key, "")).encode("utf-8"))
 elif mode == "info":
     def line(label, v):
         if v: print(f"{label:<14}{v}")
