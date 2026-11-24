@@ -139,18 +139,18 @@ function parseDetails(text) {
 
 // ---- value history ----
 // Whenever a value is replaced, the old one goes into value_history under its
-// owner ("var:KEY", "branch:BRANCH_ID:KEY", "item:ITEM_ID"), and only the
+// owner ("var:VAR_ID", "branch:BRANCH_ID:KEY", "item:ITEM_ID"), and only the
 // newest HISTORY_KEEP entries per owner are kept.
 
-const varOwner = (key) => `var:${key}`;
+const varOwner = (id) => `var:${id}`;
 const branchOwner = (branchId, key) => `branch:${branchId}:${key}`;
 const itemOwner = (id) => `item:${id}`;
 
 // Where each kind of owner keeps its current value.
 const OWNER_SQL = {
   var: {
-    select: "SELECT enc_blob FROM vars WHERE key = ?1",
-    update: "UPDATE vars SET enc_blob = ?1, updated_at = ?2 WHERE key = ?3",
+    select: "SELECT enc_blob FROM vars WHERE id = ?1",
+    update: "UPDATE vars SET enc_blob = ?1, updated_at = ?2 WHERE id = ?3",
   },
   branch: {
     select: "SELECT enc_blob FROM branch_vars WHERE branch_id = ?1 AND key = ?2",
@@ -165,10 +165,10 @@ const OWNER_SQL = {
 function parseOwner(owner) {
   const s = String(owner ?? "");
   let m;
-  if ((m = s.match(/^var:([A-Za-z_][A-Za-z0-9_]*)$/))) return { kind: "var", params: [m[1]] };
+  if ((m = s.match(/^var:([0-9a-f-]{36})$/))) return { kind: "var", params: [m[1]] };
   if ((m = s.match(/^branch:([0-9a-f-]{36}):([A-Za-z_][A-Za-z0-9_]*)$/))) return { kind: "branch", params: [m[1], m[2]] };
   if ((m = s.match(/^item:([0-9a-f-]{36})$/))) return { kind: "item", params: [m[1]] };
-  throw new HttpError("owner must look like var:KEY, branch:ID:KEY or item:ID");
+  throw new HttpError("owner must look like var:ID, branch:ID:KEY or item:ID");
 }
 
 // Statements that save oldBlob into owner's history, unless the value is unchanged.
@@ -245,26 +245,70 @@ async function findBranch(env, id) {
 }
 
 // Names and metadata only: values are fetched one at a time, per reveal or copy
-// (GET /api/vars/:key/value), so the dashboard never holds every secret at once.
-async function listVarsWithProjects(env) {
-  const vars = await env.DB.prepare("SELECT key, notes, updated_at FROM vars ORDER BY key").all();
-  const links = await env.DB.prepare("SELECT project_id, var_key FROM project_vars").all();
-  const projects = await env.DB.prepare("SELECT id, name FROM projects").all();
-  const nameById = Object.fromEntries(projects.results.map((p) => [p.id, p.name]));
-  const projectsByKey = {};
-  for (const l of links.results) {
-    (projectsByKey[l.var_key] ||= []).push(nameById[l.project_id]);
-  }
-  return vars.results.map((v) => {
-    const projects = (projectsByKey[v.key] || []).filter(Boolean).sort();
-    return { key: v.key, type: "var", notes: v.notes, projects, updated_at: v.updated_at, shared: projects.length > 1 };
-  });
+// (GET /api/vars/:id/value), so the dashboard never holds every secret at once.
+// Each variable belongs to one project (project null = personal), so the same
+// key can appear once per project, each with its own value.
+const VAR_COLUMNS =
+  "SELECT v.id, v.key, 'var' AS type, v.notes, v.updated_at, v.project_id, p.name AS project " +
+  "FROM vars v LEFT JOIN projects p ON p.id = v.project_id";
+
+async function listVars(env) {
+  return (await env.DB.prepare(`${VAR_COLUMNS} ORDER BY v.key, p.name`).all()).results;
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+// A variable by id, or by key. A key alone must be unambiguous; otherwise
+// ?project=NAME picks the project (?project= with no name: the personal one).
+async function findVar(env, ref, url) {
+  if (UUID_RE.test(ref)) {
+    const v = await env.DB.prepare(`${VAR_COLUMNS} WHERE v.id = ?1`).bind(ref).first();
+    if (!v) throw new HttpError("no such variable", 404);
+    return v;
+  }
+  const projectRef = url.searchParams.get("project");
+  let rows;
+  if (projectRef === null) {
+    rows = (await env.DB.prepare(`${VAR_COLUMNS} WHERE v.key = ?1 ORDER BY p.name`).bind(ref).all()).results;
+  } else if (projectRef === "") {
+    rows = (await env.DB.prepare(`${VAR_COLUMNS} WHERE v.key = ?1 AND v.project_id IS NULL`).bind(ref).all()).results;
+  } else {
+    const project = await findProject(env, projectRef);
+    rows = (await env.DB.prepare(`${VAR_COLUMNS} WHERE v.key = ?1 AND v.project_id = ?2`).bind(ref, project.id).all()).results;
+  }
+  if (rows.length === 0) throw new HttpError("no such variable", 404);
+  if (rows.length > 1) {
+    const where = rows.map((r) => r.project ?? "personal").join(", ");
+    throw new HttpError(`${ref} is in ${rows.length} places (${where}): add ?project=NAME or use its id`, 409);
+  }
+  return rows[0];
+}
+
+// The project a variable goes in: a known project id or name, or null for personal.
+async function parseVarProject(env, value) {
+  if (value === null || value === undefined || value === "") return null;
+  return (await findProject(env, String(value))).id;
+}
+
+// The project ids a new variable is saved in. project_id names one; the older
+// projects: [ids] form still works, and saves an independent copy in each.
+async function parseVarProjects(env, body) {
+  if (body.project_id !== undefined) return [await parseVarProject(env, body.project_id)];
+  if (body.projects === undefined) return [null];
+  if (!Array.isArray(body.projects)) throw new HttpError("projects must be a list of project ids");
+  const ids = [...new Set(body.projects.map(String))];
+  if (ids.length === 0) return [null];
+  const known = new Set((await env.DB.prepare("SELECT id FROM projects").all()).results.map((p) => p.id));
+  if (ids.some((id) => !known.has(id))) throw new HttpError("unknown project id");
+  return ids;
+}
+
+const varLabel = (key, projectName) => (projectName ? `${key} in ${projectName}` : `personal ${key}`);
 
 async function listProjects(env) {
   const [projects, links, services, branches, serviceVars] = await Promise.all([
     env.DB.prepare("SELECT * FROM projects ORDER BY name").all(),
-    env.DB.prepare("SELECT project_id, var_key FROM project_vars").all(),
+    env.DB.prepare("SELECT project_id, key FROM vars WHERE project_id IS NOT NULL").all(),
     env.DB.prepare("SELECT * FROM services ORDER BY kind, provider").all(),
     env.DB.prepare("SELECT id, project_id, name, notes, updated_at FROM branches ORDER BY name").all(),
     env.DB.prepare("SELECT service_id, var_key FROM service_vars ORDER BY var_key").all(),
@@ -278,7 +322,7 @@ async function listProjects(env) {
     return out;
   };
   const keysByProject = {};
-  for (const l of links.results) (keysByProject[l.project_id] ||= []).push(l.var_key);
+  for (const l of links.results) (keysByProject[l.project_id] ||= []).push(l.key);
   const servicesByProject = group(services.results, "project_id");
   const branchesByProject = group(branches.results, "project_id");
   return projects.results.map((p) => ({
@@ -295,15 +339,15 @@ async function listProjects(env) {
 async function branchDetail(env, branch) {
   const [vars, defaults] = await Promise.all([
     env.DB.prepare("SELECT key, notes, updated_at FROM branch_vars WHERE branch_id = ?1 ORDER BY key").bind(branch.id).all(),
-    env.DB.prepare("SELECT var_key FROM project_vars WHERE project_id = ?1").bind(branch.project_id).all(),
+    env.DB.prepare("SELECT key FROM vars WHERE project_id = ?1").bind(branch.project_id).all(),
   ]);
-  const defaultKeys = new Set(defaults.results.map((r) => r.var_key));
+  const defaultKeys = new Set(defaults.results.map((r) => r.key));
   return { ...branch, vars: vars.results.map((v) => ({ ...v, overrides: defaultKeys.has(v.key) })) };
 }
 
 async function projectEnv(env, project, branchName) {
   const rows = await env.DB.prepare(
-    "SELECT v.key, v.enc_blob FROM vars v JOIN project_vars pv ON pv.var_key = v.key WHERE pv.project_id = ?1"
+    "SELECT key, enc_blob FROM vars WHERE project_id = ?1"
   ).bind(project.id).all();
   const out = {};
   for (const r of rows.results) out[r.key] = await decryptValue(env, r.enc_blob);
@@ -346,130 +390,141 @@ async function handleApi(request, env, url) {
   }
 
   // ---- variables (project defaults) ----
+  // Each variable belongs to one project, or to none (personal). The same key can
+  // exist in several projects, each with its own value; saving one never touches another.
 
   if (pathname === "/api/vars" && method === "GET") {
-    return json(await listVarsWithProjects(env));
+    return json(await listVars(env));
   }
 
+  // Create, or replace the value of, KEY in a project: {key, value, notes?, project_id?}.
+  // project_id may be an id or a name; leave it out for a personal variable.
   if (pathname === "/api/vars" && method === "POST") {
     const body = await readBody(request);
     const key = parseKey(body.key);
-    const value = body.value ?? "";
+    const value = String(body.value ?? "");
     const { notes } = pickText(body, { notes: NOTES_MAX });
-    const projectIds = [...new Set(Array.isArray(body.projects) ? body.projects.map(String) : [])];
-    const known = new Set((await env.DB.prepare("SELECT id FROM projects").all()).results.map((p) => p.id));
-    if (projectIds.some((id) => !known.has(id))) return err("unknown project id");
-    const encBlob = await encryptValue(env, String(value));
+    const projectIds = await parseVarProjects(env, body);
     const ts = now();
-    const old = await env.DB.prepare("SELECT enc_blob FROM vars WHERE key = ?1").bind(key).first();
-    // One atomic batch: the value, its history and its project links change together or not at all.
+    const ids = [];
+    // One atomic batch: every value and its history change together or not at all.
     // Notes are only touched when sent, so older clients don't wipe them.
-    await env.DB.batch([
-      ...(await historyStmts(env, varOwner(key), old?.enc_blob, String(value))),
-      env.DB.prepare(
-        "INSERT INTO vars (key, enc_blob, updated_at, notes) VALUES (?1, ?2, ?3, coalesce(?4, '')) " +
-          "ON CONFLICT(key) DO UPDATE SET enc_blob = ?2, updated_at = ?3, notes = coalesce(?4, notes)"
-      ).bind(key, encBlob, ts, notes ?? null),
-      env.DB.prepare("DELETE FROM project_vars WHERE var_key = ?1").bind(key),
-      ...projectIds.map((pid) =>
-        env.DB.prepare("INSERT INTO project_vars (project_id, var_key) VALUES (?1, ?2)").bind(pid, key)
-      ),
-    ]);
-    return json({ ok: true, key });
+    const stmts = [];
+    for (const projectId of projectIds) {
+      const old = await env.DB.prepare("SELECT id, enc_blob FROM vars WHERE key = ?1 AND coalesce(project_id, '') = coalesce(?2, '')")
+        .bind(key, projectId).first();
+      const encBlob = await encryptValue(env, value);
+      if (old) {
+        stmts.push(
+          ...(await historyStmts(env, varOwner(old.id), old.enc_blob, value)),
+          env.DB.prepare("UPDATE vars SET enc_blob = ?1, updated_at = ?2, notes = coalesce(?3, notes) WHERE id = ?4")
+            .bind(encBlob, ts, notes ?? null, old.id)
+        );
+        ids.push(old.id);
+      } else {
+        const id = crypto.randomUUID();
+        stmts.push(
+          env.DB.prepare("INSERT INTO vars (id, project_id, key, enc_blob, notes, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
+            .bind(id, projectId, key, encBlob, notes ?? "", ts)
+        );
+        ids.push(id);
+      }
+    }
+    await env.DB.batch(stmts);
+    return json({ ok: true, id: ids[0], ids, key });
   }
 
+  // :ref is a variable id, or its key (add ?project=NAME when several projects have that key).
   const valueMatch = pathname.match(/^\/api\/vars\/([^/]+)\/value$/);
   if (valueMatch && method === "GET") {
-    const key = decodeURIComponent(valueMatch[1]);
-    const row = await env.DB.prepare("SELECT enc_blob FROM vars WHERE key = ?1").bind(key).first();
-    if (!row) return err("no such variable", 404);
+    const v = await findVar(env, decodeURIComponent(valueMatch[1]), url);
+    const row = await env.DB.prepare("SELECT enc_blob FROM vars WHERE id = ?1").bind(v.id).first();
     return json({ value: await decryptValue(env, row.enc_blob) }, 200, { "Cache-Control": "no-store" });
   }
 
   const varMatch = pathname.match(/^\/api\/vars\/([^/]+)$/);
   if (varMatch && method === "GET") {
-    const key = decodeURIComponent(varMatch[1]);
-    const v = (await listVarsWithProjects(env)).find((r) => r.key === key);
-    if (!v) return err("no such variable", 404);
-    return json(v);
+    return json(await findVar(env, decodeURIComponent(varMatch[1]), url));
   }
 
-  // Partial edit: any of key (rename), value, notes, projects (project ids).
+  // Partial edit: any of key (rename), value, notes, project_id (move to another project, or null for personal).
   if (varMatch && method === "PATCH") {
-    const oldKey = decodeURIComponent(varMatch[1]);
+    const v = await findVar(env, decodeURIComponent(varMatch[1]), url);
     const body = await readBody(request);
-    const row = await env.DB.prepare("SELECT key, enc_blob FROM vars WHERE key = ?1").bind(oldKey).first();
-    if (!row) return err("no such variable", 404);
-    const newKey = body.key === undefined ? oldKey : parseKey(body.key);
+    const newKey = body.key === undefined ? v.key : parseKey(body.key);
+    let projectId = v.project_id;
+    if (body.project_id !== undefined) {
+      projectId = await parseVarProject(env, body.project_id);
+    } else if (body.projects !== undefined) {
+      // Older clients send projects: [ids]; a variable now lives in one project.
+      if (!Array.isArray(body.projects)) return err("projects must be a list of project ids");
+      const ids = [...new Set(body.projects.map(String))];
+      if (ids.length > 1) return err("a variable belongs to one project: save a separate copy in each project");
+      projectId = await parseVarProject(env, ids[0] ?? null);
+    }
     const fields = pickText(body, { notes: NOTES_MAX });
     const stmts = [];
     if (body.value !== undefined) {
       const value = String(body.value ?? "");
-      stmts.push(...(await historyStmts(env, varOwner(oldKey), row.enc_blob, value)));
+      const row = await env.DB.prepare("SELECT enc_blob FROM vars WHERE id = ?1").bind(v.id).first();
+      stmts.push(...(await historyStmts(env, varOwner(v.id), row.enc_blob, value)));
       fields.enc_blob = await encryptValue(env, value);
     }
-    fields.updated_at = now();
 
-    let projectIds = null;
-    if (body.projects !== undefined) {
-      if (!Array.isArray(body.projects)) return err("projects must be a list of project ids");
-      projectIds = [...new Set(body.projects.map(String))];
-      const known = new Set((await env.DB.prepare("SELECT id FROM projects").all()).results.map((p) => p.id));
-      if (projectIds.some((id) => !known.has(id))) return err("unknown project id");
-    }
-
-    if (newKey !== oldKey) {
-      if (await env.DB.prepare("SELECT 1 FROM vars WHERE key = ?1").bind(newKey).first()) {
-        return err(`${newKey} already exists`, 409);
-      }
-      // Branch overrides of this variable follow the rename, in the projects it belongs to.
+    if (newKey !== v.key || projectId !== v.project_id) {
       const clash = await env.DB.prepare(
-        "SELECT 1 FROM branch_vars bv JOIN branches b ON b.id = bv.branch_id " +
-          "JOIN project_vars pv ON pv.project_id = b.project_id AND pv.var_key = ?1 WHERE bv.key = ?2"
-      ).bind(oldKey, newKey).first();
-      if (clash) return err(`a branch already overrides ${newKey}`, 409);
+        "SELECT p.name FROM vars v LEFT JOIN projects p ON p.id = v.project_id " +
+          "WHERE v.key = ?1 AND coalesce(v.project_id, '') = coalesce(?2, '') AND v.id != ?3"
+      ).bind(newKey, projectId, v.id).first();
+      if (clash) return err(`${varLabel(newKey, clash.name)} already exists`, 409);
+      fields.key = newKey;
+      fields.project_id = projectId;
+    }
+
+    // Renamed within its project: that project's branch overrides and service links follow.
+    if (newKey !== v.key && v.project_id && projectId === v.project_id) {
+      const branchClash = await env.DB.prepare(
+        "SELECT 1 FROM branch_vars bv JOIN branches b ON b.id = bv.branch_id WHERE b.project_id = ?1 AND bv.key = ?2"
+      ).bind(v.project_id, newKey).first();
+      if (branchClash) return err(`a branch already overrides ${newKey}`, 409);
       stmts.push(
+        // Branch history owners are "branch:<36-char id>:KEY".
         env.DB.prepare(
-          "INSERT INTO vars (key, enc_blob, updated_at, notes) SELECT ?2, enc_blob, updated_at, notes FROM vars WHERE key = ?1"
-        ).bind(oldKey, newKey),
+          "UPDATE value_history SET owner = 'branch:' || substr(owner, 8, 36) || ':' || ?3 WHERE owner IN " +
+            "(SELECT 'branch:' || b.id || ':' || ?2 FROM branches b WHERE b.project_id = ?1)"
+        ).bind(v.project_id, v.key, newKey),
         env.DB.prepare(
-          "UPDATE branch_vars SET key = ?2 WHERE key = ?1 AND branch_id IN " +
-            "(SELECT b.id FROM branches b JOIN project_vars pv ON pv.project_id = b.project_id WHERE pv.var_key = ?1)"
-        ).bind(oldKey, newKey),
-        // History and service links move with it (branch owners are "branch:<36-char id>:KEY").
+          "UPDATE branch_vars SET key = ?3 WHERE key = ?2 AND branch_id IN (SELECT id FROM branches WHERE project_id = ?1)"
+        ).bind(v.project_id, v.key, newKey),
         env.DB.prepare(
-          "UPDATE value_history SET owner = 'branch:' || substr(owner, 8, 36) || ':' || ?2 WHERE owner IN " +
-            "(SELECT 'branch:' || b.id || ':' || ?1 FROM branches b JOIN project_vars pv ON pv.project_id = b.project_id WHERE pv.var_key = ?1)"
-        ).bind(oldKey, newKey),
-        env.DB.prepare(
-          "UPDATE service_vars SET var_key = ?2 WHERE var_key = ?1 AND service_id IN " +
-            "(SELECT s.id FROM services s JOIN project_vars pv ON pv.project_id = s.project_id WHERE pv.var_key = ?1)"
-        ).bind(oldKey, newKey),
-        env.DB.prepare("UPDATE value_history SET owner = ?2 WHERE owner = ?1").bind(varOwner(oldKey), varOwner(newKey)),
-        env.DB.prepare("UPDATE project_vars SET var_key = ?2 WHERE var_key = ?1").bind(oldKey, newKey),
-        env.DB.prepare("DELETE FROM vars WHERE key = ?1").bind(oldKey)
+          "UPDATE service_vars SET var_key = ?3 WHERE var_key = ?2 AND service_id IN (SELECT id FROM services WHERE project_id = ?1)"
+        ).bind(v.project_id, v.key, newKey)
       );
     }
+
+    fields.updated_at = now();
     const set = setClause(fields);
-    stmts.push(env.DB.prepare(`UPDATE vars SET ${set.sql} WHERE key = ?${set.next}`).bind(...set.values, newKey));
-    if (projectIds) {
-      stmts.push(
-        env.DB.prepare("DELETE FROM project_vars WHERE var_key = ?1").bind(newKey),
-        ...projectIds.map((pid) =>
-          env.DB.prepare("INSERT INTO project_vars (project_id, var_key) VALUES (?1, ?2)").bind(pid, newKey)
-        )
-      );
+    stmts.push(env.DB.prepare(`UPDATE vars SET ${set.sql} WHERE id = ?${set.next}`).bind(...set.values, v.id));
+    try {
+      await env.DB.batch(stmts);
+    } catch (e) {
+      if (isUniqueError(e)) return err(`${newKey} already exists there`, 409);
+      throw e;
     }
-    await env.DB.batch(stmts);
-    return json({ ok: true, key: newKey });
+    return json({ ok: true, id: v.id, key: newKey, project_id: projectId });
   }
 
   if (varMatch && method === "DELETE") {
-    const key = decodeURIComponent(varMatch[1]);
+    let v;
+    try {
+      v = await findVar(env, decodeURIComponent(varMatch[1]), url);
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 404) return json({ ok: true });
+      throw e;
+    }
     await env.DB.batch([
-      env.DB.prepare("DELETE FROM project_vars WHERE var_key = ?1").bind(key),
-      env.DB.prepare("DELETE FROM value_history WHERE owner = ?1").bind(varOwner(key)),
-      env.DB.prepare("DELETE FROM vars WHERE key = ?1").bind(key),
+      env.DB.prepare("DELETE FROM value_history WHERE owner = ?1").bind(varOwner(v.id)),
+      env.DB.prepare("DELETE FROM vars WHERE id = ?1").bind(v.id),
     ]);
     return json({ ok: true });
   }
@@ -599,7 +654,9 @@ async function handleApi(request, env, url) {
       env.DB.prepare("DELETE FROM services WHERE project_id = ?1").bind(id),
       // Personal items linked to it stay, just unlinked.
       env.DB.prepare("UPDATE items SET project_id = NULL WHERE project_id = ?1").bind(id),
-      env.DB.prepare("DELETE FROM project_vars WHERE project_id = ?1").bind(id),
+      // Its variables are its own, so they go with it, history included.
+      env.DB.prepare("DELETE FROM value_history WHERE owner IN (SELECT 'var:' || id FROM vars WHERE project_id = ?1)").bind(id),
+      env.DB.prepare("DELETE FROM vars WHERE project_id = ?1").bind(id),
       env.DB.prepare("DELETE FROM projects WHERE id = ?1").bind(id),
     ]);
     return json({ ok: true });

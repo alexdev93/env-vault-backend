@@ -85,11 +85,32 @@ try {
   const list = await (await fetch(BASE + "/api/vars", withCookie())).json();
   const row = list.find((v) => v.key === "SMOKE_URL");
   check("GET /api/vars lists names without values", !!row && !("value" in row) && row.type === "var", JSON.stringify(row));
-  check("GET /api/vars links it to the project", row?.projects?.[0] === "smoke-app" && row?.shared === false);
+  check("GET /api/vars puts it in the project", row?.project === "smoke-app" && row?.project_id === proj.id && !!row?.id, JSON.stringify(row));
   const val = await fetch(BASE + "/api/vars/SMOKE_URL/value", withCookie());
   check("GET /api/vars/:key/value decrypts it back exactly", val.status === 200 && (await val.json()).value === secret);
   check("GET /api/vars/:key/value unknown key → 404", (await fetch(BASE + "/api/vars/NOPE/value", withCookie())).status === 404);
   check("GET /api/vars/:key/value without auth → 401", (await fetch(BASE + "/api/vars/SMOKE_URL/value")).status === 401);
+
+  // The same key in two projects: two separate variables, neither overwrites the other.
+  const other = await (await fetch(BASE + "/api/projects", withCookie(json({ name: "smoke-other" })))).json();
+  await fetch(BASE + "/api/vars", withCookie(json({ key: "SMOKE_URL", value: "other-value", project_id: other.id })));
+  const both = (await (await fetch(BASE + "/api/vars", withCookie())).json()).filter((v) => v.key === "SMOKE_URL");
+  check("same key in a second project is a separate variable", both.length === 2 && both[0].id !== both[1].id, JSON.stringify(both));
+  const valueOf = async (path) => (await (await fetch(BASE + path, withCookie())).json()).value;
+  check("… the first project keeps its own value",
+    (await valueOf(`/api/vars/${row.id}/value`)) === secret && (await valueOf("/api/vars/SMOKE_URL/value?project=smoke-app")) === secret);
+  check("… the second project has its value", (await valueOf("/api/vars/SMOKE_URL/value?project=smoke-other")) === "other-value");
+  check("… a bare key that is in two projects → 409", (await fetch(BASE + "/api/vars/SMOKE_URL/value", withCookie())).status === 409);
+  const envOf = async (name) => (await (await fetch(BASE + `/api/projects/${name}/env`, withCookie())).json()).SMOKE_URL;
+  check("… each project's env gets its own value", (await envOf("smoke-app")) === secret && (await envOf("smoke-other")) === "other-value");
+  const otherId = both.find((v) => v.project === "smoke-other").id;
+  await fetch(BASE + `/api/vars/${otherId}`, withCookie({ method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value: "other-2" }) }));
+  check("… editing one leaves the other alone", (await envOf("smoke-app")) === secret && (await envOf("smoke-other")) === "other-2");
+  check("… moving one into a project that has the key → 409",
+    (await fetch(BASE + `/api/vars/${otherId}`, withCookie({ method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: proj.id }) }))).status === 409);
+  await fetch(BASE + "/api/projects/smoke-other", withCookie({ method: "DELETE" }));
+  check("deleting a project deletes its own variables, not other projects'",
+    (await (await fetch(BASE + "/api/vars", withCookie())).json()).filter((v) => v.key === "SMOKE_URL").length === 1 && (await envOf("smoke-app")) === secret);
 
   // CLI flow (bearer token)
   const bearer = { headers: { Authorization: `Bearer ${SECRETS.API_TOKEN}` } };
@@ -218,29 +239,31 @@ try {
 
   // value history: the last 5 replaced values, oldest dropped first
   const hist = async (owner) => getJson(`/api/history?owner=${encodeURIComponent(owner)}`);
-  await send("POST", "/api/vars", { key: "HIST_KEY", value: "v0" });
-  check("a new variable has no history", (await hist("var:HIST_KEY")).length === 0);
-  await send("POST", "/api/vars", { key: "HIST_KEY", value: "v0" });
-  check("saving the same value adds no history", (await hist("var:HIST_KEY")).length === 0);
+  const histId = (await (await send("POST", "/api/vars", { key: "HIST_KEY", value: "v0" })).json()).id;
+  const histOwner = `var:${histId}`;
+  check("a new variable has no history", (await hist(histOwner)).length === 0);
+  check("saving the same key and project again updates it in place",
+    (await (await send("POST", "/api/vars", { key: "HIST_KEY", value: "v0" })).json()).id === histId);
+  check("saving the same value adds no history", (await hist(histOwner)).length === 0);
   for (let i = 1; i <= 6; i++) await send("PATCH", "/api/vars/HIST_KEY", { value: `v${i}` });
-  let h = await hist("var:HIST_KEY");
+  let h = await hist(histOwner);
   check("history keeps only the last 5 values", h.length === 5, JSON.stringify(h));
   const histValues = [];
   for (const e of h) histValues.push((await getJson(`/api/history/${e.id}/value`)).value);
   check("… newest first, oldest (v0) dropped", histValues.join(",") === "v5,v4,v3,v2,v1", histValues.join(","));
   check("PATCH notes only adds no history",
-    (await send("PATCH", "/api/vars/HIST_KEY", { notes: "n" })).status === 200 && (await hist("var:HIST_KEY")).length === 5);
+    (await send("PATCH", "/api/vars/HIST_KEY", { notes: "n" })).status === 200 && (await hist(histOwner)).length === 5);
   const restore = await send("POST", `/api/history/${h[3].id}/restore`, {});
   check("POST /api/history/:id/restore puts v2 back",
     restore.status === 200 && (await getJson("/api/vars/HIST_KEY/value")).value === "v2");
-  h = await hist("var:HIST_KEY");
+  h = await hist(histOwner);
   const afterRestore = [];
   for (const e of h) afterRestore.push((await getJson(`/api/history/${e.id}/value`)).value);
   check("… and v6 goes into history in its place", afterRestore.join(",") === "v6,v5,v4,v3,v1", afterRestore.join(","));
   await send("PATCH", "/api/vars/HIST_KEY", { key: "HIST_RENAMED" });
-  check("history follows a rename", (await hist("var:HIST_RENAMED")).length === 5 && (await hist("var:HIST_KEY")).length === 0);
+  check("history stays with the variable through a rename", (await hist(histOwner)).length === 5);
   await send("DELETE", "/api/vars/HIST_RENAMED");
-  check("deleting a variable deletes its history", (await hist("var:HIST_RENAMED")).length === 0);
+  check("deleting a variable deletes its history", (await hist(histOwner)).length === 0);
   check("GET /api/history bad owner → 400", (await fetch(BASE + "/api/history?owner=nope", withCookie())).status === 400);
 
   // branch value history, project status/stack/details, services linked to variables
@@ -292,6 +315,7 @@ try {
   check("PATCH /api/items/:id value keeps history",
     (await getJson(`/api/items/${loginItem.id}/value`)).value === "pw2" && (await hist(`item:${loginItem.id}`)).length === 1);
   await send("DELETE", "/api/projects/smoke-hist");
+  check("deleting a project deletes its variables", !(await getJson("/api/vars")).some((v) => v.key === "SMOKE_DATABASE"));
   check("deleting a project unlinks its items, keeps them", (await getJson("/api/items"))[0]?.project_id === null);
   check("DELETE /api/items/:id", (await send("DELETE", `/api/items/${loginItem.id}`)).status === 200 &&
     (await getJson("/api/items")).length === 0 && (await hist(`item:${loginItem.id}`)).length === 0);

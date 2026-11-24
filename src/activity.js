@@ -36,7 +36,7 @@ function classify(request, url, status, auth) {
     return { kind: "env_pull", project: dec(x[1]).toLowerCase(), branch: url.searchParams.get("branch") ?? "" };
   }
   if (m === "GET") {
-    if ((x = pathname.match(/^\/api\/vars\/([^/]+)\/value$/))) return { kind: "value_read", target: dec(x[1]) };
+    if ((x = pathname.match(/^\/api\/vars\/([^/]+)\/value$/))) return { kind: "value_read", varRef: dec(x[1]), target: dec(x[1]) };
     if ((x = pathname.match(/^\/api\/branches\/([^/]+)\/vars\/([^/]+)\/value$/))) return { kind: "value_read", branchId: dec(x[1]), target: dec(x[2]) };
     if ((x = pathname.match(/^\/api\/items\/([^/]+)\/value$/))) return { kind: "value_read", itemId: dec(x[1]) };
     if ((x = pathname.match(/^\/api\/history\/(\d+)\/value$/))) return { kind: "value_read", target: `earlier value #${x[1]}` };
@@ -67,6 +67,17 @@ export async function recordAccess(env, request, url, response) {
       const b = await env.DB.prepare("SELECT b.name, p.name AS project FROM branches b JOIN projects p ON p.id = b.project_id WHERE b.id = ?1")
         .bind(c.branchId).first();
       if (b) ({ name: branch, project } = b);
+    }
+    if (c.varRef) {
+      // By id from the dashboard, or by key (and ?project=) from the API.
+      const v = await env.DB.prepare(
+        "SELECT v.key, p.name AS project FROM vars v LEFT JOIN projects p ON p.id = v.project_id " +
+          "WHERE v.id = ?1 OR (v.key = ?1 AND (?2 IS NULL OR coalesce(p.name, '') = lower(?2))) LIMIT 1"
+      ).bind(c.varRef, url.searchParams.get("project")).first();
+      if (v) {
+        target = v.key;
+        project = v.project ?? "";
+      }
     }
     if (c.itemId) {
       const it = await env.DB.prepare("SELECT i.title, p.name AS project FROM items i LEFT JOIN projects p ON p.id = i.project_id WHERE i.id = ?1")

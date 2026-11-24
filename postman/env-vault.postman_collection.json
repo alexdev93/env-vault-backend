@@ -57,15 +57,15 @@
       "request": {
         "method": "GET",
         "url": "{{baseUrl}}/api/vars",
-        "description": "Names and metadata only ({key, type, projects, updated_at, shared}). Use Get variable value for a value."
+        "description": "Names and metadata only ({id, key, type, project_id, project, notes, updated_at}). The same key can appear once per project. Use Get variable value for a value."
       }
     },
     {
       "name": "Get variable value",
       "request": {
         "method": "GET",
-        "url": "{{baseUrl}}/api/vars/DATABASE_URL/value",
-        "description": "Returns {value} for one variable. The dashboard calls this per reveal or copy."
+        "url": "{{baseUrl}}/api/vars/DATABASE_URL/value?project={{project}}",
+        "description": "Returns {value} for one variable, by id or by key. With a key that several projects have, ?project=NAME picks one (409 without it). The dashboard calls this per reveal or copy, by id."
       }
     },
     {
@@ -94,14 +94,14 @@
       "name": "Get variable",
       "request": {
         "method": "GET",
-        "url": "{{baseUrl}}/api/vars/DATABASE_URL"
+        "url": "{{baseUrl}}/api/vars/DATABASE_URL?project={{project}}"
       }
     },
     {
       "name": "Edit variable",
       "request": {
         "method": "PATCH",
-        "url": "{{baseUrl}}/api/vars/DATABASE_URL",
+        "url": "{{baseUrl}}/api/vars/DATABASE_URL?project={{project}}",
         "header": [
           {
             "key": "Content-Type",
@@ -112,7 +112,7 @@
           "mode": "raw",
           "raw": "{\n  \"notes\": \"Neon main database\"\n}"
         },
-        "description": "Any of key (rename), value, notes, projects."
+        "description": "Any of key (rename), value, notes, project_id (move to another project; null for personal). 409 if that project already has the key."
       }
     },
     {
@@ -306,7 +306,7 @@
       "request": {
         "method": "GET",
         "url": "{{baseUrl}}/api/history?owner=var:DATABASE_URL",
-        "description": "Last 5 replaced values (ids + dates). Owners: var:KEY, branch:BRANCH_ID:KEY, item:ITEM_ID."
+        "description": "Last 5 replaced values (ids + dates). Owners: var:VAR_ID, branch:BRANCH_ID:KEY, item:ITEM_ID."
       }
     },
     {

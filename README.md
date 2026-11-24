@@ -126,8 +126,11 @@ To rotate a secret, run `printf '%s' "$NEWVALUE" | npx wrangler secret put NAME`
 
 ## Data model
 
-- **vars**: a variable's default value (encrypted) and notes, linked to
-  any number of projects through **project_vars**.
+- **vars**: a variable's default value (encrypted) and notes. Each one
+  belongs to one project (`project_id`), or to none (a personal variable).
+  The same key can exist in several projects, each with its own value:
+  `(project, key)` is unique, so saving `GEMINI_API_KEY` in one project never
+  touches another project's `GEMINI_API_KEY`.
 - **projects**: name, description, notes, `repo_url`, `site_url`, `status`
   (idea, building, live, maintenance, archived), `stack`, and free-form
   `details` (`[{label, value}]`).
@@ -182,12 +185,17 @@ routes change only the fields you send.
 
 | Route | What it does |
 | --- | --- |
-| `GET /api/vars` | names + notes + projects, no values |
-| `POST /api/vars` | upsert `{key, value, projects, notes?}` (notes kept if omitted) |
-| `GET /api/vars/:key` | one variable's metadata |
-| `PATCH /api/vars/:key` | `{key?, value?, notes?, projects?}`; a new `key` renames it, and branch overrides follow |
-| `GET /api/vars/:key/value` | the decrypted value |
-| `DELETE /api/vars/:key` | delete it |
+| `GET /api/vars` | `[{id, key, project_id, project, notes, updated_at}]`, no values |
+| `POST /api/vars` | `{key, value, project_id?, notes?}`: creates the key in that project (id or name; omit for personal), or replaces its value if the project already has it (notes kept if omitted) |
+| `GET /api/vars/:ref` | one variable's metadata |
+| `PATCH /api/vars/:ref` | `{key?, value?, notes?, project_id?}`; a new `key` renames it (its project's branch overrides follow), a new `project_id` moves it. 409 if the target project already has that key |
+| `GET /api/vars/:ref/value` | the decrypted value |
+| `DELETE /api/vars/:ref` | delete it |
+
+`:ref` is the variable's id, or its key. A key that more than one project has
+is a 409 unless you add `?project=NAME` (`?project=` alone: the personal one),
+e.g. `GET /api/vars/GEMINI_API_KEY/value?project=my-api`. Deleting a project
+deletes its variables.
 | `GET /api/projects` | every project with keys, services, branches |
 | `POST /api/projects` | `{name, description?, notes?, repo_url?, site_url?, status?, stack?, details?, services?: [...], branches?: ["main", {name, notes}]}` |
 | `GET /api/projects/:project` | full details, including each branch's variables |
@@ -205,7 +213,7 @@ routes change only the fields you send.
 | `POST /api/items` | `{type: login\|note\|secret, title, value, url?, username?, notes?, project_id?}` |
 | `PATCH` / `DELETE /api/items/:id` | `{title?, url?, username?, notes?, project_id?, value?}` / delete |
 | `GET /api/items/:id/value` | the decrypted password, note or secret |
-| `GET /api/history?owner=O` | `[{id, created_at}]`, newest first; `O` is `var:KEY`, `branch:ID:KEY` or `item:ID` |
+| `GET /api/history?owner=O` | `[{id, created_at}]`, newest first; `O` is `var:VAR_ID`, `branch:ID:KEY` or `item:ID` |
 | `GET /api/history/:id/value` | one earlier value, decrypted |
 | `POST /api/history/:id/restore` | put it back; the value it replaces goes into history |
 | `GET /api/activity/summary?days=30&project=` | totals, pulls per day, heartbeat per project (last pull, by whom, sparkline data), clients and what they pull |
